@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#07070a" />
+    <meta name="description" content="TMD — TABLETOP MASTER DESIGN。一站式桌游制作测试。永久免费。商务联系：张苏杭 zhangsuhang04551@gmail.com" />
+    <meta name="author" content="张苏杭" />
+    <meta name="keywords" content="TMD,TABLETOP MASTER DESIGN,桌游大师,桌游制作,卡牌编辑,试玩,永久免费" />
+    <meta property="og:title" content="TMD · TABLETOP MASTER DESIGN" />
+    <meta property="og:description" content="TABLETOP MASTER DESIGN · 永久免费" />
+    <title>TMD · TABLETOP MASTER DESIGN</title>
+    <style>
+      html, body, #root { height: 100%; margin: 0; background: #07070a; color: #f4f4f0; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <p style="padding: 40px; font-family: sans-serif;">TMD 需要开启 JavaScript。请解压整个文件夹后双击「打开卡牌工坊.bat」，再用浏览器打开 http://localhost:1420/</p>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      window.setTimeout(function () {
+        var root = document.getElementById("root");
+        if (!root || root.childElementCount) return;
+        root.innerHTML =
+          '<p style="padding:40px;max-width:36em;font-family:sans-serif;line-height:1.5">页面没有加载出来。请先解压整个文件夹（不要在压缩包里直接打开），双击「打开卡牌工坊.bat」，并保持那个黑窗口开着。地址栏应是 http://localhost:1420/ 或 http://localhost:1420/#/app ，不要写成 prject。</p>';
+      }, 20000);
+    </script>
+  </body>
+</html>

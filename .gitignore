@@ -1,0 +1,17 @@
+node_modules
+projects
+dist
+dist-ssr
+*.local
+src-tauri/target
+src-tauri/gen
+.DS_Store
+data/market
+data/play-cache
+release
+public/桌游大师-离线包.zip
+public/TMD-离线包.zip
+public/TMD-offline.zip
+vendor/node
+vendor/node-v*-win-x64.zip
+vendor/_node_extract
