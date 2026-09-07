@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoxFace, UvIsland } from "@/model/types";
 import { BOX_FACES, FACE_LABEL, islandVisual } from "@/model/box";
-import { loadBoxTexture } from "./boxTexture";
+import { bakeTextureFit, loadBoxTexture, type TextureFitMode } from "./boxTexture";
 
 type Drag =
   | { kind: "pan"; x: number; y: number; panX: number; panY: number }
@@ -155,6 +155,8 @@ export function UvEditor({
   onSelect,
   onPatch,
   snap = true,
+  textureFit = "cover",
+  textureTileScale = 1,
 }: {
   faces: Record<BoxFace, UvIsland>;
   textureUrl?: string | null;
@@ -163,10 +165,12 @@ export function UvEditor({
   onSelect: (face: BoxFace) => void;
   onPatch: (face: BoxFace, patch: Partial<UvIsland>, merging: boolean) => void;
   snap?: boolean;
+  textureFit?: TextureFitMode;
+  textureTileScale?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | HTMLCanvasElement | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const facesRef = useRef(faces);
   const hoverRef = useRef<string>("default");
@@ -378,7 +382,7 @@ export function UvEditor({
     void loadBoxTexture(textureUrl, projectDir)
       .then((img) => {
         if (dead) return;
-        imgRef.current = img;
+        imgRef.current = bakeTextureFit(img, textureFit, textureTileScale);
         paint();
       })
       .catch(() => {
@@ -390,7 +394,7 @@ export function UvEditor({
     return () => {
       dead = true;
     };
-  }, [textureUrl, projectDir]);
+  }, [textureUrl, projectDir, textureFit, textureTileScale]);
 
   useEffect(() => {
     paint();

@@ -7,6 +7,7 @@ import { PlayPage } from "@/features/play/PlayPage";
 import { PrintPage } from "@/features/print/PrintPage";
 import { SetsPage } from "@/features/sets/SetsPage";
 import { TemplateEditor } from "@/features/template/TemplateEditor";
+import { PieceSpecLibrary } from "@/features/template/PieceSpecLibrary";
 import { MediaPage } from "@/features/media/MediaPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { VarsPage } from "@/features/vars/VarsPage";
@@ -14,6 +15,7 @@ import { MarketPage } from "@/features/market/MarketPage";
 import { WorkspaceLayout } from "@/features/workspace/WorkspaceLayout";
 import { BoxPage } from "@/features/box/BoxPage";
 import { ManualPage } from "@/features/manual/ManualPage";
+import { ShotPage } from "@/features/shot/ShotPage";
 import { useAppStore } from "@/store/appStore";
 import { bootLocale, useT } from "@/store/localeStore";
 import { applyTheme, useThemeStore } from "@/store/themeStore";
@@ -102,6 +104,7 @@ function AppRoutes({ current }: { current: boolean }) {
           element={current ? <WorkspaceLayout /> : <Navigate to="/app" replace />}
         >
           <Route index element={<Navigate to="template" replace />} />
+          <Route path="specs" element={<PieceSpecLibrary />} />
           <Route path="template" element={<TemplateEditor />} />
           <Route path="sets" element={<SetsPage />} />
           <Route path="deck" element={<DeckPage />} />
@@ -112,6 +115,7 @@ function AppRoutes({ current }: { current: boolean }) {
           <Route path="print" element={<PrintPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="box" element={<BoxPage />} />
+          <Route path="shot" element={<ShotPage />} />
           <Route path="manual" element={<ManualPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import {
   access,
   copyFile,
+  cp,
   mkdir,
   readdir,
   readFile,
@@ -297,10 +298,12 @@ async function writeSplitProject(dir: string, project: Record<string, unknown>):
     "utf8",
   );
   await writeJsonDir(path.join(dataDir, "blueprints"), (project.blueprints as { id?: string }[]) ?? [], "bp");
+  await writeJsonDir(path.join(dataDir, "piece-specs"), (project.pieceSpecs as { id?: string }[]) ?? [], "psp");
   await writeJsonDir(path.join(dataDir, "sets"), (project.sets as { id?: string }[]) ?? [], "set");
   await writeJsonDir(path.join(dataDir, "templates"), (project.templates as { id?: string }[]) ?? [], "tpl");
   await writeJsonDir(path.join(dataDir, "decks"), (project.decks as { id?: string }[]) ?? [], "deck");
   await writeJsonDir(path.join(dataDir, "boxes"), (project.boxes as { id?: string }[]) ?? [], "box");
+  await writeJsonDir(path.join(dataDir, "shots"), (project.shots as { id?: string }[]) ?? [], "shot");
   await writeFile(path.join(dataDir, "variables.json"), JSON.stringify(project.variables ?? [], null, 2), "utf8");
   await writeFile(path.join(dataDir, "fonts.json"), JSON.stringify(project.fonts ?? [], null, 2), "utf8");
   await writeFile(path.join(dataDir, "assets.json"), JSON.stringify(assetIndex, null, 2), "utf8");
@@ -350,8 +353,10 @@ async function readProjectFolder(dir: string): Promise<unknown> {
     templates: await readJsonDir(path.join(dataDir, "templates")),
     decks: await readJsonDir(path.join(dataDir, "decks")),
     blueprints: await readJsonDir(path.join(dataDir, "blueprints")),
+    pieceSpecs: await readJsonDir(path.join(dataDir, "piece-specs")),
     sets: await readJsonDir(path.join(dataDir, "sets")),
     boxes: await readJsonDir(path.join(dataDir, "boxes")),
+    shots: await readJsonDir(path.join(dataDir, "shots")),
     variables: (await readSide("variables.json")) ?? [],
     fonts: (await readSide("fonts.json")) ?? [],
     print: (await readSide("export.json")) ?? parsed.print,
@@ -465,7 +470,7 @@ function handleFs(req: IncomingMessage, res: ServerResponse, next: Connect.NextF
   }
 
   void readBody(req).then(async (text) => {
-    let body: { path?: string; text?: string; project?: unknown; name?: string; base64?: string } = {};
+    let body: { path?: string; from?: string; text?: string; project?: unknown; name?: string; base64?: string; meta?: unknown } = {};
     try {
       body = JSON.parse(text || "{}") as typeof body;
     } catch {
@@ -528,6 +533,43 @@ function handleFs(req: IncomingMessage, res: ServerResponse, next: Connect.NextF
           files: names.filter((n) => n.isFile()).map((n) => n.name),
           dirs: names.filter((n) => n.isDirectory()).map((n) => n.name),
         });
+        return;
+      }
+      if (url.startsWith("/__fs/copy-project")) {
+        if (!clientIsLocal(req)) {
+          json(res, { error: "remote" }, 403);
+          return;
+        }
+        const from = safeWinPath(typeof body.from === "string" ? body.from : "");
+        if (!from) {
+          res.statusCode = 400;
+          res.end("bad from");
+          return;
+        }
+        if (path.resolve(from) === path.resolve(disk)) {
+          res.statusCode = 400;
+          res.end("源路径与目标路径相同");
+          return;
+        }
+        await access(from, constants.F_OK);
+        await mkdir(disk, { recursive: true });
+        await cp(from, disk, { recursive: true, force: true });
+        const metaIn = (body.meta ?? {}) as { id?: string; name?: string; note?: string };
+        const pj = path.join(disk, "data", "project.json");
+        try {
+          const parsed = JSON.parse(await readFile(pj, "utf8")) as { meta?: Record<string, unknown> };
+          parsed.meta = {
+            ...(parsed.meta ?? {}),
+            ...(metaIn.id ? { id: metaIn.id } : {}),
+            ...(metaIn.name ? { name: metaIn.name } : {}),
+            ...(metaIn.note !== undefined ? { note: metaIn.note } : {}),
+            updatedAt: new Date().toISOString(),
+          };
+          await writeFile(pj, JSON.stringify(parsed, null, 2), "utf8");
+        } catch {
+          /* 无 data/project.json 时仍保留拷贝结果 */
+        }
+        json(res, { ok: true });
         return;
       }
       if (url.startsWith("/__fs/write-project")) {

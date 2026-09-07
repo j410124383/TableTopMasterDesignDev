@@ -23,6 +23,8 @@ import {
   IconPrint,
   IconRedo,
   IconSave,
+  IconShot,
+  IconSpec,
   IconUndo,
   IconVars,
 } from "@/ui/Icons";
@@ -243,9 +245,10 @@ export function WorkspaceLayout() {
   const bp = current.blueprints.find((b) => b.id === (blueprintId ?? current.blueprints[0]?.id));
   const selected = (face === "front" ? bp?.frontLayers : bp?.backLayers)?.find((l) => l.id === selectedId);
 
-  const pieces = ["/project/template", "/project/sets", "/project/deck"].some((p) => location.pathname.startsWith(p));
+  const pieces = ["/project/specs", "/project/template", "/project/sets", "/project/deck"].some((p) => location.pathname.startsWith(p));
   const showPieceSub = pieces || location.pathname.startsWith("/project/vars");
   const packing = location.pathname.startsWith("/project/box");
+  const shooting = location.pathname.startsWith("/project/shot");
   const manual = location.pathname.startsWith("/project/manual");
 
   return (
@@ -304,6 +307,10 @@ export function WorkspaceLayout() {
             <span className="tab-ico"><IconDice size={15} /></span>
             <span className="tab-lbl">{t("ws.stage")}</span>
           </NavLink>
+          <NavLink to="/project/shot" className={() => `tab ${shooting ? "active" : ""}`} title={t("ws.shot")}>
+            <span className="tab-ico"><IconShot size={15} /></span>
+            <span className="tab-lbl">{t("ws.shot")}</span>
+          </NavLink>
           <NavLink to="/project/print" className={({ isActive }) => `tab ${isActive ? "active" : ""}`} title={t("ws.print")}>
             <span className="tab-ico"><IconPrint size={15} /></span>
             <span className="tab-lbl">{t("ws.print")}</span>
@@ -341,6 +348,10 @@ export function WorkspaceLayout() {
       </header>
       {showPieceSub && (
         <nav className="tabs sub-tabs">
+          <NavLink to="/project/specs" className={({ isActive }) => `tab ${isActive ? "active" : ""}`} title={t("ws.pieceSpec")}>
+            <span className="tab-ico"><IconSpec size={15} /></span>
+            <span className="tab-lbl">{t("ws.pieceSpec")}</span>
+          </NavLink>
           <NavLink to="/project/template" className={({ isActive }) => `tab ${isActive ? "active" : ""}`} title={t("ws.blueprint")}>
             <span className="tab-ico"><IconLayers size={15} /></span>
             <span className="tab-lbl">{t("ws.blueprint")}</span>
@@ -410,10 +421,10 @@ export function WorkspaceLayout() {
       {help && <ShortcutsHelp onClose={() => setHelp(false)} />}
       {cloneOpen && current && (
         <CreateProjectDialog
-          cloneSource={{ name: current.meta.name, project: current }}
+          cloneSource={{ name: current.meta.name, project: current, sourcePath: currentPath ?? undefined }}
           onClose={() => setCloneOpen(false)}
           onCreate={async (input) => {
-            await create({ ...input, fromProject: current });
+            await create({ ...input, fromProject: current, sourcePath: input.sourcePath ?? currentPath ?? undefined });
             setCloneOpen(false);
             navigate("/project/template");
           }}

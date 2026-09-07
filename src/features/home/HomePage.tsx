@@ -60,7 +60,7 @@ export function HomePage() {
   const [appZip, setAppZip] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createFolder, setCreateFolder] = useState<PickedFolder | null>(null);
-  const [cloning, setCloning] = useState<{ name: string; project: Project } | null>(null);
+  const [cloning, setCloning] = useState<{ name: string; project: Project; sourcePath?: string } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; entry: AppIndexEntry } | null>(null);
   const [folderGone, setFolderGone] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<AppIndexEntry | null>(null);
@@ -211,7 +211,12 @@ export function HomePage() {
     try {
       const project =
         (await loadCachedProject(entry.id)) ?? (await openProjectById(entry.id)).project;
-      setCloning({ name: entry.name, project });
+      const sourcePath = resolveOwnedPath(entry, index.projects);
+      setCloning({
+        name: entry.name,
+        project,
+        sourcePath: looksLikeFullPath(sourcePath) ? sourcePath : undefined,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : t("err.cloneSrc"));
     }
@@ -668,7 +673,7 @@ export function HomePage() {
           cloneSource={cloning}
           onClose={() => setCloning(null)}
           onCreate={async (input) => {
-            await create({ ...input, fromProject: cloning.project });
+            await create({ ...input, fromProject: cloning.project, sourcePath: cloning.sourcePath ?? input.sourcePath });
             setCloning(null);
             setShelf("board");
             navigate("/project/template");

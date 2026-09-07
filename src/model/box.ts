@@ -1,5 +1,5 @@
 import { uid } from "@/lib/id";
-import type { BoxFace, BoxRenderSetup, PackagingBox, UvIsland } from "./types";
+import type { BoxFace, BoxRenderSetup, PackagingBox, TextureFit, UvIsland } from "./types";
 
 export const BOX_FACES: BoxFace[] = ["top", "bottom", "front", "back", "left", "right"];
 
@@ -76,6 +76,9 @@ export function createPackagingBox(name = "包装盒"): PackagingBox {
     heightMm,
     faces: defaultUvNet(lengthMm, widthMm, heightMm),
     render: defaultBoxRender(lengthMm, widthMm, heightMm),
+    textureFit: "cover",
+    textureTileScale: 1,
+    bevelMm: 0,
   };
 }
 
@@ -103,7 +106,28 @@ export function ensureBoxFaces(box: PackagingBox): PackagingBox {
       uniformScale: cur.uniformScale !== false,
     };
   }
-  return { ...box, faces };
+  const fit = box.textureFit === "original" || box.textureFit === "tile" ? box.textureFit : "cover";
+  const tile = Number(box.textureTileScale);
+  const bevel = Number(box.bevelMm);
+  const cap = Math.min(box.lengthMm, box.widthMm, box.heightMm) / 4;
+  return {
+    ...box,
+    faces,
+    textureFit: fit,
+    textureTileScale: Number.isFinite(tile) && tile > 0 ? tile : 1,
+    bevelMm: Number.isFinite(bevel) ? Math.max(0, Math.min(bevel, cap)) : 0,
+  };
+}
+
+export function boxTextureFit(box: PackagingBox): TextureFit {
+  return box.textureFit === "original" || box.textureFit === "tile" ? box.textureFit : "cover";
+}
+
+export function boxBevelMm(box: PackagingBox): number {
+  const cap = Math.min(box.lengthMm, box.widthMm, box.heightMm) / 4;
+  const n = Number(box.bevelMm);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(n, cap);
 }
 
 /** 盒子摆放：立着 / 躺着 / 侧躺 */

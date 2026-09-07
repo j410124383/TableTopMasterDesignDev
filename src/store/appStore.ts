@@ -67,6 +67,7 @@ type AppState = {
     parentPath?: string;
     pathLabel?: string;
     fromProject?: Project;
+    sourcePath?: string;
   }) => Promise<void>;
   open: (id: string) => Promise<void>;
   openFile: (text: string, pathLabel?: string) => Promise<void>;

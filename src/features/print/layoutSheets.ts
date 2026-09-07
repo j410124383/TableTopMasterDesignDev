@@ -17,7 +17,13 @@ export type SheetPlan = {
 };
 
 export function expandCards(cards: Card[]): Card[] {
-  return cards.flatMap((card) => Array.from({ length: card.qty }, () => card));
+  return cards.flatMap((card) => Array.from({ length: Math.max(0, card.qty) }, () => card));
+}
+
+function layoutBleedMm(template: Template, settings: PrintSettings): number {
+  const mode = settings.mode ?? "print";
+  if (mode === "print") return Math.max(0, settings.bleedMm);
+  return settings.includeBleed ? Math.max(0, template.bleedMm) : 0;
 }
 
 export function planSheets(
@@ -25,31 +31,51 @@ export function planSheets(
   cards: Card[],
   settings: PrintSettings,
 ): SheetPlan {
-  const tts = settings.mode === "tts";
-  const cardW = template.size.w + (tts ? 0 : settings.bleedMm * 2);
-  const cardH = template.size.h + (tts ? 0 : settings.bleedMm * 2);
+  const mode = settings.mode ?? "print";
+  const tts = mode === "tts";
+  const single = mode === "single";
+  const bleed = layoutBleedMm(template, settings);
+  const cardW = template.size.w + bleed * 2;
+  const cardH = template.size.h + bleed * 2;
+
+  if (single) {
+    const pages: Slot[][] = cards.map((card, i) => [{ card, index: i, col: 0, row: 0 }]);
+    if (pages.length === 0) pages.push([]);
+    return {
+      paper: { w: cardW, h: cardH },
+      cols: 1,
+      rows: 1,
+      cardW,
+      cardH,
+      originX: 0,
+      originY: 0,
+      slotsPerPage: 1,
+      pages,
+    };
+  }
+
   const gap = tts ? 0 : settings.gapMm;
+  const margin = tts ? 0 : settings.marginMm;
+  const offsetX = tts ? 0 : settings.offsetX;
+  const offsetY = tts ? 0 : settings.offsetY;
   const cols = tts ? Math.max(1, settings.ttsCols ?? 10) : 0;
   const rows = tts ? Math.max(1, settings.ttsRows ?? 8) : 0;
   const paper = tts
-    ? {
-        w: cols * cardW + settings.marginMm * 2,
-        h: rows * cardH + settings.marginMm * 2,
-      }
+    ? { w: cols * cardW, h: rows * cardH }
     : paperSizeMm(settings.paper, settings.orientation, {
         w: settings.customW,
         h: settings.customH,
       });
-  const innerW = paper.w - settings.marginMm * 2;
-  const innerH = paper.h - settings.marginMm * 2;
+  const innerW = paper.w - margin * 2;
+  const innerH = paper.h - margin * 2;
   const autoCols = Math.max(1, Math.floor((innerW + gap) / (cardW + gap)));
   const autoRows = Math.max(1, Math.floor((innerH + gap) / (cardH + gap)));
   const useCols = tts ? cols : autoCols;
   const useRows = tts ? rows : autoRows;
   const gridW = useCols * cardW + (useCols - 1) * gap;
   const gridH = useRows * cardH + (useRows - 1) * gap;
-  const originX = (paper.w - gridW) / 2 + settings.offsetX;
-  const originY = (paper.h - gridH) / 2 + settings.offsetY;
+  const originX = (paper.w - gridW) / 2 + offsetX;
+  const originY = (paper.h - gridH) / 2 + offsetY;
   const slotsPerPage = useCols * useRows;
   const copies = expandCards(cards);
   const pages: Slot[][] = [];
@@ -84,10 +110,11 @@ export function slotPosition(
   settings: PrintSettings,
   mirror: boolean,
 ) {
+  const gap = settings.mode === "tts" || settings.mode === "single" ? 0 : settings.gapMm;
   const col = mirror ? plan.cols - 1 - slot.col : slot.col;
   return {
-    x: plan.originX + col * (plan.cardW + (settings.mode === "tts" ? 0 : settings.gapMm)),
-    y: plan.originY + slot.row * (plan.cardH + (settings.mode === "tts" ? 0 : settings.gapMm)),
+    x: plan.originX + col * (plan.cardW + gap),
+    y: plan.originY + slot.row * (plan.cardH + gap),
   };
 }
 
@@ -148,6 +175,45 @@ export function flattenPrintPages(jobs: PrintJob[]): FlatPrintPage[] {
   const pages: FlatPrintPage[] = [];
   for (const job of jobs) {
     job.plan.pages.forEach((slots, local) => pages.push({ job, local, slots }));
+  }
+  return pages;
+}
+
+export type ExportPage = {
+  id: string;
+  job: PrintJob;
+  local: number;
+  slots: Slot[];
+  face: "front" | "back";
+  index: number;
+};
+
+export function flattenExportPages(jobs: PrintJob[], settings: PrintSettings): ExportPage[] {
+  const pages: ExportPage[] = [];
+  let index = 0;
+  for (const job of jobs) {
+    job.plan.pages.forEach((slots, local) => {
+      index += 1;
+      pages.push({
+        id: `${job.set.id}:${local}:front`,
+        job,
+        local,
+        slots,
+        face: "front",
+        index,
+      });
+      if (settings.duplex && job.back) {
+        index += 1;
+        pages.push({
+          id: `${job.set.id}:${local}:back`,
+          job,
+          local,
+          slots,
+          face: "back",
+          index,
+        });
+      }
+    });
   }
   return pages;
 }

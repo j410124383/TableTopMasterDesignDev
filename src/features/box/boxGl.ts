@@ -7,12 +7,15 @@ import {
   matLookAt,
   matMul,
   matPerspective,
+  matOrtho,
   matRotateXYZ,
   matTranslate,
   matInvert,
   mulVec4,
   orbitEye,
   rayHitFace,
+  rayHitMesh,
+  type BoxMesh,
   type Mat4,
   type Vec3,
 } from "./boxGeom";
@@ -21,14 +24,17 @@ const VS = `
 attribute vec3 aPos;
 attribute vec2 aUv;
 attribute vec3 aNrm;
+attribute float aUseTex;
 uniform mat4 uMVP;
 uniform mat4 uModel;
 varying vec2 vUv;
 varying vec3 vNrm;
+varying float vUseTex;
 void main() {
   gl_Position = uMVP * vec4(aPos, 1.0);
   vUv = aUv;
   vNrm = mat3(uModel) * aNrm;
+  vUseTex = aUseTex;
 }
 `;
 
@@ -36,8 +42,11 @@ const FS = `
 precision mediump float;
 varying vec2 vUv;
 varying vec3 vNrm;
+varying float vUseTex;
 uniform sampler2D uTex;
+uniform sampler2D uTexBack;
 uniform float uHasTex;
+uniform float uHasBackTex;
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
 uniform float uKey;
@@ -46,8 +55,11 @@ uniform float uAmbient;
 uniform vec3 uTint;
 void main() {
   vec3 n = normalize(vNrm);
-  float ndl = max(dot(n, normalize(uLightDir)), 0.0);
-  vec4 albedo = mix(vec4(uTint, 1.0), texture2D(uTex, vUv), uHasTex);
+  if (!gl_FrontFacing) n = -n;
+  float ndl = abs(dot(n, normalize(uLightDir)));
+  vec4 texc = vUseTex > 1.5 ? texture2D(uTexBack, vUv) : texture2D(uTex, vUv);
+  float has = vUseTex > 1.5 ? uHasBackTex : uHasTex;
+  vec4 albedo = mix(vec4(uTint, 1.0), texc, has * texc.a * step(0.5, vUseTex));
   vec3 base = albedo.rgb;
   vec3 lit = base * uAmbient + base * ndl * uKey * uLightColor + base * uFill;
   gl_FragColor = vec4(lit, albedo.a);
@@ -121,6 +133,19 @@ export type BoxViewOpts = {
   transparentBg?: boolean;
   background?: string;
   gizmos?: boolean;
+  groundY?: number;
+  gridSize?: number;
+  silhouette?: boolean;
+};
+
+export type SceneDrawItem = {
+  id: string;
+  mesh: BoxMesh;
+  image: HTMLImageElement | HTMLCanvasElement | null;
+  backImage?: HTMLImageElement | HTMLCanvasElement | null;
+  model: Mat4;
+  selected?: boolean;
+  tint?: [number, number, number];
 };
 
 export class BoxGl {
@@ -131,6 +156,7 @@ export class BoxGl {
   private aPos: number;
   private aUv: number;
   private aNrm: number;
+  private aUseTex: number;
   private lineProg: WebGLProgram;
   private aLinePos: number;
   private aLineCol: number;
@@ -139,11 +165,14 @@ export class BoxGl {
   private bufPos: WebGLBuffer;
   private bufUv: WebGLBuffer;
   private bufNrm: WebGLBuffer;
+  private bufUseTex: WebGLBuffer;
   private vCount = 0;
   private checker: WebGLTexture;
   private tex: WebGLTexture | null = null;
+  private texCache = new Map<CanvasImageSource, WebGLTexture>();
   private hasTex = false;
   private mvp: Mat4 = matLookAt([0, 0, 1], [0, 0, 0], [0, 1, 0]);
+  private vp: Mat4 | null = null;
   private invVp: Mat4 | null = null;
   private model: Mat4 = matTranslate(0, 0, 0);
   private box: PackagingBox | null = null;
@@ -167,11 +196,14 @@ export class BoxGl {
     this.aPos = gl.getAttribLocation(prog, "aPos");
     this.aUv = gl.getAttribLocation(prog, "aUv");
     this.aNrm = gl.getAttribLocation(prog, "aNrm");
+    this.aUseTex = gl.getAttribLocation(prog, "aUseTex");
     this.loc = {
       uMVP: gl.getUniformLocation(prog, "uMVP"),
       uModel: gl.getUniformLocation(prog, "uModel"),
       uTex: gl.getUniformLocation(prog, "uTex"),
+      uTexBack: gl.getUniformLocation(prog, "uTexBack"),
       uHasTex: gl.getUniformLocation(prog, "uHasTex"),
+      uHasBackTex: gl.getUniformLocation(prog, "uHasBackTex"),
       uLightDir: gl.getUniformLocation(prog, "uLightDir"),
       uLightColor: gl.getUniformLocation(prog, "uLightColor"),
       uKey: gl.getUniformLocation(prog, "uKey"),
@@ -193,10 +225,11 @@ export class BoxGl {
     this.bufPos = gl.createBuffer()!;
     this.bufUv = gl.createBuffer()!;
     this.bufNrm = gl.createBuffer()!;
+    this.bufUseTex = gl.createBuffer()!;
     this.bufLineCol = gl.createBuffer()!;
     this.checker = checkerTexture(gl);
     gl.enable(gl.DEPTH_TEST);
-    gl.enable(gl.CULL_FACE);
+    gl.disable(gl.CULL_FACE);
   }
 
   setSize(cssW: number, cssH: number, dpr = window.devicePixelRatio || 1) {
@@ -221,6 +254,8 @@ export class BoxGl {
     gl.bufferData(gl.ARRAY_BUFFER, mesh.uv, gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bufNrm);
     gl.bufferData(gl.ARRAY_BUFFER, mesh.nrm, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufUseTex);
+    gl.bufferData(gl.ARRAY_BUFFER, onesFor(mesh.pos.length / 3), gl.DYNAMIC_DRAW);
     this.vCount = mesh.pos.length / 3;
   }
 
@@ -270,10 +305,11 @@ export class BoxGl {
     const view = matLookAt(eye, [0, 0, 0], [0, 1, 0]);
     const near = Math.max(1, cam.distance / 80);
     const far = cam.distance * 8;
-    const proj = matPerspective(cam.fov, aspect, near, far);
+    const proj = makeProj(setup, aspect, near, far);
     const vp = matMul(proj, view);
-    this.mvp = matMul(vp, model);
+    this.vp = vp;
     this.invVp = matInvert(vp);
+    this.mvp = matMul(vp, model);
     const transparent = opts.transparentBg || setup.cullBackground;
     const bg = parseColor(opts.background ?? setup.background ?? "#1c1c22");
     if (transparent) gl.clearColor(0, 0, 0, 0);
@@ -289,6 +325,11 @@ export class BoxGl {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bufNrm);
     gl.enableVertexAttribArray(this.aNrm);
     gl.vertexAttribPointer(this.aNrm, 3, gl.FLOAT, false, 0, 0);
+    if (this.aUseTex >= 0) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufUseTex);
+      gl.enableVertexAttribArray(this.aUseTex);
+      gl.vertexAttribPointer(this.aUseTex, 1, gl.FLOAT, false, 0, 0);
+    }
     gl.uniformMatrix4fv(this.loc.uMVP, false, this.mvp);
     gl.uniformMatrix4fv(this.loc.uModel, false, model);
     const key = setup.lights.key;
@@ -302,6 +343,10 @@ export class BoxGl {
     gl.bindTexture(gl.TEXTURE_2D, this.hasTex && this.tex ? this.tex : this.checker);
     gl.uniform1i(this.loc.uTex, 0);
     gl.uniform1f(this.loc.uHasTex, this.hasTex ? 1 : 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.checker);
+    gl.uniform1i(this.loc.uTexBack, 1);
+    gl.uniform1f(this.loc.uHasBackTex, 0);
     gl.uniform3f(this.loc.uTint, 0.78, 0.76, 0.72);
     gl.drawArrays(gl.TRIANGLES, 0, this.vCount);
 
@@ -310,32 +355,45 @@ export class BoxGl {
     }
 
     if (opts.gizmos !== false) {
-      this.drawGizmos(setup, vp);
+      this.drawGizmos(setup, vp, opts);
     }
   }
 
   private drawFaceOutline(face: BoxFace) {
     if (!this.box) return;
     const mesh = boxMesh(this.box);
-    const idx = mesh.faces.findIndex((f) => f === face);
-    if (idx < 0) return;
+    const pos: number[] = [];
+    const nrm: number[] = [];
+    for (let i = 0; i < mesh.faces.length; i++) {
+      if (mesh.faces[i] !== face) continue;
+      pos.push(mesh.pos[i * 3]!, mesh.pos[i * 3 + 1]!, mesh.pos[i * 3 + 2]!);
+      nrm.push(mesh.nrm[i * 3]!, mesh.nrm[i * 3 + 1]!, mesh.nrm[i * 3 + 2]!);
+    }
+    if (!pos.length) return;
     const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pos), gl.DYNAMIC_DRAW);
+    gl.vertexAttribPointer(this.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufNrm);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(nrm), gl.DYNAMIC_DRAW);
+    gl.vertexAttribPointer(this.aNrm, 3, gl.FLOAT, false, 0, 0);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     gl.uniform1f(this.loc.uHasTex, 0);
     gl.uniform3f(this.loc.uTint, 0.55, 0.95, 0.2);
     gl.uniform1f(this.loc.uKey, 0.15);
     gl.uniform1f(this.loc.uAmbient, 0.55);
-    gl.drawArrays(gl.TRIANGLES, idx, 6);
+    gl.drawArrays(gl.TRIANGLES, 0, pos.length / 3);
     gl.disable(gl.BLEND);
+    this.setMesh(this.box);
   }
 
-  private drawGizmos(setup: BoxRenderSetup, vp: Mat4) {
+  private drawGizmos(setup: BoxRenderSetup, vp: Mat4, opts: BoxViewOpts = {}) {
     const gl = this.gl;
     const box = this.box;
-    const g = Math.max(80, (box ? Math.max(box.lengthMm, box.widthMm) : 100) * 1.6);
+    const g = opts.gridSize ?? Math.max(80, (box ? Math.max(box.lengthMm, box.widthMm) : 100) * 1.6);
     const step = g / 8;
-    const groundY = box ? -box.heightMm / 2 : 0;
+    const groundY = opts.groundY ?? (box ? -box.heightMm / 2 : 0);
     const grid: number[] = [];
     const gridCol: number[] = [];
     const overlay: number[] = [];
@@ -386,7 +444,7 @@ export class BoxGl {
     gl.enable(gl.DEPTH_TEST);
     gl.disableVertexAttribArray(this.aLinePos);
     gl.disableVertexAttribArray(this.aLineCol);
-    gl.enable(gl.CULL_FACE);
+    gl.disable(gl.CULL_FACE);
     if (this.box) this.setMesh(this.box);
   }
 
@@ -462,14 +520,215 @@ export class BoxGl {
     return out;
   }
 
+  private uploadMesh(mesh: BoxMesh) {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.pos, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufUv);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.uv, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufNrm);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.nrm, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufUseTex);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.useTex ?? onesFor(mesh.pos.length / 3), gl.DYNAMIC_DRAW);
+    this.vCount = mesh.pos.length / 3;
+  }
+
+  private bindImage(image: HTMLImageElement | HTMLCanvasElement | null, unit = 0): boolean {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    if (!image) {
+      gl.bindTexture(gl.TEXTURE_2D, this.checker);
+      return false;
+    }
+    let tex = this.texCache.get(image);
+    if (!tex) {
+      const w = "naturalWidth" in image ? image.naturalWidth : image.width;
+      const h = "naturalHeight" in image ? image.naturalHeight : image.height;
+      if (!w || !h) {
+        gl.bindTexture(gl.TEXTURE_2D, this.checker);
+        return false;
+      }
+      tex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.texCache.set(image, tex);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    return true;
+  }
+
+  private bindMeshAttribs() {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufPos);
+    gl.enableVertexAttribArray(this.aPos);
+    gl.vertexAttribPointer(this.aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufUv);
+    gl.enableVertexAttribArray(this.aUv);
+    gl.vertexAttribPointer(this.aUv, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufNrm);
+    gl.enableVertexAttribArray(this.aNrm);
+    gl.vertexAttribPointer(this.aNrm, 3, gl.FLOAT, false, 0, 0);
+    if (this.aUseTex >= 0) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufUseTex);
+      gl.enableVertexAttribArray(this.aUseTex);
+      gl.vertexAttribPointer(this.aUseTex, 1, gl.FLOAT, false, 0, 0);
+    }
+  }
+
+  drawScene(setup: BoxRenderSetup, items: SceneDrawItem[], opts: BoxViewOpts = {}) {
+    this.setup = setup;
+    this.box = null;
+    const gl = this.gl;
+    const aspect = this.w / this.h;
+    const cam = setup.camera;
+    const eye = orbitEye(cam.yaw, cam.pitch, cam.distance);
+    const view = matLookAt(eye, [0, 0, 0], [0, 1, 0]);
+    const near = Math.max(1, cam.distance / 80);
+    const far = cam.distance * 8;
+    const proj = makeProj(setup, aspect, near, far);
+    const vp = matMul(proj, view);
+    this.vp = vp;
+    this.invVp = matInvert(vp);
+    const transparent = opts.transparentBg || setup.cullBackground;
+    const bg = parseColor(opts.background ?? setup.background ?? "#1c1c22");
+    if (opts.silhouette) gl.clearColor(0, 0, 0, 1);
+    else if (transparent) gl.clearColor(0, 0, 0, 0);
+    else gl.clearColor(bg[0], bg[1], bg[2], 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.frontFace(gl.CCW);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+    gl.useProgram(this.prog);
+    const key = setup.lights.key;
+    const ld = lightDir(key.yaw, key.pitch);
+    if (opts.silhouette) {
+      gl.uniform3fv(this.loc.uLightDir, [0, 1, 0]);
+      gl.uniform3fv(this.loc.uLightColor, [1, 1, 1]);
+      gl.uniform1f(this.loc.uKey, 0);
+      gl.uniform1f(this.loc.uFill, 0);
+      gl.uniform1f(this.loc.uAmbient, 1);
+      gl.uniform3f(this.loc.uTint, 1, 1, 1);
+    } else {
+      gl.uniform3fv(this.loc.uLightDir, ld);
+      gl.uniform3fv(this.loc.uLightColor, parseColor(key.color));
+      gl.uniform1f(this.loc.uKey, key.intensity);
+      gl.uniform1f(this.loc.uFill, setup.lights.fillIntensity ?? 0.25);
+      gl.uniform1f(this.loc.uAmbient, setup.lights.ambient ?? 0.3);
+      gl.uniform3f(this.loc.uTint, 0.78, 0.76, 0.72);
+    }
+    gl.uniform1i(this.loc.uTex, 0);
+    gl.uniform1i(this.loc.uTexBack, 1);
+    for (const item of items) {
+      this.uploadMesh(item.mesh);
+      this.bindMeshAttribs();
+      const hasFront = this.bindImage(item.image, 0);
+      const hasBack = this.bindImage(item.backImage ?? null, 1);
+      const mvp = matMul(vp, item.model);
+      gl.uniformMatrix4fv(this.loc.uMVP, false, mvp);
+      gl.uniformMatrix4fv(this.loc.uModel, false, item.model);
+      gl.uniform1f(this.loc.uHasTex, opts.silhouette ? 0 : hasFront ? 1 : 0);
+      gl.uniform1f(this.loc.uHasBackTex, opts.silhouette ? 0 : hasBack ? 1 : 0);
+      if (item.tint && !opts.silhouette) gl.uniform3f(this.loc.uTint, item.tint[0], item.tint[1], item.tint[2]);
+      else if (!opts.silhouette) gl.uniform3f(this.loc.uTint, 0.78, 0.76, 0.72);
+      gl.drawArrays(gl.TRIANGLES, 0, this.vCount);
+      if (item.selected && !opts.silhouette) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.uniform1f(this.loc.uHasTex, 0);
+        gl.uniform1f(this.loc.uHasBackTex, 0);
+        gl.uniform3f(this.loc.uTint, 0.55, 0.95, 0.2);
+        gl.uniform1f(this.loc.uKey, 0.12);
+        gl.uniform1f(this.loc.uAmbient, 0.5);
+        gl.drawArrays(gl.TRIANGLES, 0, this.vCount);
+        gl.disable(gl.BLEND);
+        gl.uniform3f(this.loc.uTint, item.tint ? item.tint[0] : 0.78, item.tint ? item.tint[1] : 0.76, item.tint ? item.tint[2] : 0.72);
+        gl.uniform1f(this.loc.uKey, key.intensity);
+        gl.uniform1f(this.loc.uAmbient, setup.lights.ambient ?? 0.3);
+      }
+    }
+    if (opts.gizmos !== false && !opts.silhouette) {
+      this.drawGizmos(setup, vp, { ...opts, groundY: opts.groundY ?? 0, gridSize: opts.gridSize ?? 220 });
+    }
+  }
+
+  pickScene(cssX: number, cssY: number, items: SceneDrawItem[]): string | null {
+    if (!this.invVp) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const ndcX = (cssX / rect.width) * 2 - 1;
+    const ndcY = 1 - (cssY / rect.height) * 2;
+    const n = mulVec4(this.invVp, [ndcX, ndcY, -1, 1]);
+    const f = mulVec4(this.invVp, [ndcX, ndcY, 1, 1]);
+    const nw = n[3] || 1;
+    const fw = f[3] || 1;
+    const near: Vec3 = [n[0] / nw, n[1] / nw, n[2] / nw];
+    const far: Vec3 = [f[0] / fw, f[1] / fw, f[2] / fw];
+    const dir: Vec3 = [far[0] - near[0], far[1] - near[1], far[2] - near[2]];
+    const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+    dir[0] /= len;
+    dir[1] /= len;
+    dir[2] /= len;
+    let best = Infinity;
+    let hitId: string | null = null;
+    for (const item of items) {
+      const invModel = matInvert(item.model);
+      if (!invModel) continue;
+      const o4 = mulVec4(invModel, [near[0], near[1], near[2], 1]);
+      const d4 = mulVec4(invModel, [near[0] + dir[0], near[1] + dir[1], near[2] + dir[2], 1]);
+      const origin: Vec3 = [o4[0], o4[1], o4[2]];
+      const localDir: Vec3 = [d4[0] - o4[0], d4[1] - o4[1], d4[2] - o4[2]];
+      const dl = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
+      const t = rayHitMesh(origin, [localDir[0] / dl, localDir[1] / dl, localDir[2] / dl], item.mesh);
+      if (t != null && t < best) {
+        best = t;
+        hitId = item.id;
+      }
+    }
+    return hitId;
+  }
+
+  worldRay(cssX: number, cssY: number): { origin: Vec3; dir: Vec3 } | null {
+    if (!this.invVp) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const ndcX = (cssX / rect.width) * 2 - 1;
+    const ndcY = 1 - (cssY / rect.height) * 2;
+    const n = mulVec4(this.invVp, [ndcX, ndcY, -1, 1]);
+    const f = mulVec4(this.invVp, [ndcX, ndcY, 1, 1]);
+    const nw = n[3] || 1;
+    const fw = f[3] || 1;
+    const near: Vec3 = [n[0] / nw, n[1] / nw, n[2] / nw];
+    const far: Vec3 = [f[0] / fw, f[1] / fw, f[2] / fw];
+    const dir: Vec3 = [far[0] - near[0], far[1] - near[1], far[2] - near[2]];
+    const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+    return { origin: near, dir: [dir[0] / len, dir[1] / len, dir[2] / len] };
+  }
+
+  projectWorld(p: Vec3): { x: number; y: number } | null {
+    if (!this.vp) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const clip = mulVec4(this.vp, [p[0], p[1], p[2], 1]);
+    const w = clip[3] || 1;
+    const ndcX = clip[0] / w;
+    const ndcY = clip[1] / w;
+    return { x: (ndcX * 0.5 + 0.5) * rect.width, y: (1 - (ndcY * 0.5 + 0.5)) * rect.height };
+  }
+
   dispose() {
     const gl = this.gl;
     gl.deleteBuffer(this.bufPos);
     gl.deleteBuffer(this.bufUv);
     gl.deleteBuffer(this.bufNrm);
+    gl.deleteBuffer(this.bufUseTex);
     gl.deleteBuffer(this.bufLineCol);
     gl.deleteTexture(this.checker);
     if (this.tex) gl.deleteTexture(this.tex);
+    for (const t of this.texCache.values()) gl.deleteTexture(t);
+    this.texCache.clear();
     gl.deleteProgram(this.prog);
     gl.deleteProgram(this.lineProg);
   }
@@ -480,3 +739,23 @@ export function loadTextureImage(src: string, projectDir?: string | null): Promi
 }
 
 export { ensureBoxRender };
+
+function makeProj(setup: BoxRenderSetup, aspect: number, near: number, far: number) {
+  const cam = setup.camera;
+  if (setup.projection === "isometric") {
+    const halfH = Math.max(20, cam.distance * 0.42);
+    return matOrtho(halfH * aspect, halfH, near, far);
+  }
+  return matPerspective(cam.fov, aspect, near, far);
+}
+
+const onesCache = new Map<number, Float32Array>();
+function onesFor(n: number) {
+  let a = onesCache.get(n);
+  if (!a) {
+    a = new Float32Array(n);
+    a.fill(1);
+    onesCache.set(n, a);
+  }
+  return a;
+}

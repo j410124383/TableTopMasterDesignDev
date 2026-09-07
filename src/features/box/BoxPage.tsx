@@ -1,45 +1,22 @@
 import { useMemo, useRef, useState } from "react";
 import { ingestImageFile } from "@/lib/ingestAsset";
-import { BOX_POSE_PRESETS, ensureBoxRender } from "@/model/box";
-import type { BoxFace, PackagingBox, UvIsland } from "@/model/types";
-import { writeDiskBytes } from "@/persist/nodeFs";
-import { looksLikeFullPath } from "@/persist/storage";
+import { BOX_POSE_PRESETS, boxBevelMm, boxTextureFit, ensureBoxRender } from "@/model/box";
+import type { BoxFace, PackagingBox, TextureFit, UvIsland } from "@/model/types";
 import { useAppStore } from "@/store/appStore";
 import { useEditorStore } from "@/store/editorStore";
 import { ColorField } from "@/ui/ColorField";
-import { BoxGl, loadTextureImage } from "./boxGl";
+import { HelpTip } from "@/ui/HelpTip";
+import { BoxGl } from "./boxGl";
+import { loadFittedBoxTexture } from "./boxTexture";
 import { BoxLibrary } from "./BoxLibrary";
 import { BoxUvPanel } from "./BoxUvPanel";
 import { BoxViewport } from "./BoxViewport";
+import { saveRenderPng } from "./saveRenderPng";
 
 type Step = "struct" | "render";
 
 function mmToCm(n: number) {
   return Math.round((n / 10) * 100) / 100;
-}
-
-function joinDisk(dir: string, rel: string) {
-  return `${dir.replace(/[\\/]+$/, "")}\\${rel.replaceAll("/", "\\")}`;
-}
-
-function stamp() {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-}
-
-function safeName(name: string) {
-  return name.replace(/[\\/:*?"<>|]+/g, "_").trim() || "包装盒";
-}
-
-function bytesToBase64(buf: Uint8Array) {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < buf.length; i += chunk) {
-    const slice = buf.subarray(i, i + chunk);
-    for (let j = 0; j < slice.length; j++) binary += String.fromCharCode(slice[j]!);
-  }
-  return btoa(binary);
 }
 
 export function BoxPage() {
@@ -111,7 +88,7 @@ function BoxEditor({ box }: { box: PackagingBox }) {
       let img = null;
       if (textureSrc) {
         try {
-          img = await loadTextureImage(textureSrc, currentPath);
+          img = await loadFittedBoxTexture(textureSrc, currentPath, boxTextureFit(box), box.textureTileScale ?? 1);
         } catch {
           img = null;
         }
@@ -120,23 +97,8 @@ function BoxEditor({ box }: { box: PackagingBox }) {
       gl.draw(render, { transparentBg: render.cullBackground, gizmos: false });
       const shot = gl.snapshot(!!render.cullOutsideBox);
       gl.dispose();
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        shot.toBlob((b) => (b ? resolve(b) : reject(new Error("无法导出 PNG"))), "image/png");
-      });
-      const fileName = `${safeName(box.name)}_${stamp()}.png`;
-      if (currentPath && looksLikeFullPath(currentPath)) {
-        const full = joinDisk(currentPath, `渲染图/${fileName}`);
-        const buf = new Uint8Array(await blob.arrayBuffer());
-        await writeDiskBytes(full, bytesToBase64(buf));
-        setInfo(`已保存到 ${full}`);
-      } else {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = fileName;
-        a.click();
-        URL.revokeObjectURL(a.href);
-        setInfo("未绑定本机工程文件夹，已下载渲染图。绑定文件夹后会写入「渲染图」子目录。");
-      }
+      const msg = await saveRenderPng(shot, box.name, currentPath);
+      setInfo(msg);
     } catch (err) {
       setError(err instanceof Error ? err.message : "渲染失败");
     } finally {
@@ -153,10 +115,12 @@ function BoxEditor({ box }: { box: PackagingBox }) {
 
   return (
     <div className="page box-page">
-      <div className="page-head">
-        <div>
+      <div className="page-head page-head-compact">
+        <div className="row" style={{ alignItems: "center", gap: 8 }}>
           <h1>{box.name}</h1>
-          <p className="muted">方盒 → 一张贴图 + UV → 产品渲染。UV 在次级编辑器里调。</p>
+          <HelpTip>
+            <p>方盒 → 一张贴图 + UV → 本盒渲染。UV 在次级编辑器里调。倒角跟这只盒子绑定，产品渲染场景会直接用。</p>
+          </HelpTip>
         </div>
         <div className="row">
           <button type="button" className="btn btn-primary" onClick={() => setBoxLibraryOpen(true)}>
@@ -310,6 +274,48 @@ function BoxEditor({ box }: { box: PackagingBox }) {
                   <p className="muted">未贴图时显示棋盘材质。</p>
                 )}
               </div>
+              <div className="field">
+                <label>贴图铺法</label>
+                <div className="row" style={{ flexWrap: "wrap" }}>
+                  {(
+                    [
+                      ["original", "原始尺寸"],
+                      ["cover", "撑满"],
+                      ["tile", "平铺"],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`btn btn-small ${boxTextureFit(box) === id ? "btn-primary" : ""}`}
+                      onClick={() => patchBox((b) => ({ ...b, textureFit: id as TextureFit }))}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {boxTextureFit(box) === "tile" ? (
+                  <>
+                    <label>平铺倍率 {box.textureTileScale ?? 1}</label>
+                    <input
+                      type="range"
+                      min={0.25}
+                      max={8}
+                      step={0.25}
+                      value={box.textureTileScale ?? 1}
+                      onChange={(e) =>
+                        patchBox((b) => ({ ...b, textureTileScale: Number(e.target.value) }), "box-tile")
+                      }
+                    />
+                  </>
+                ) : (
+                  <p className="muted">
+                    {boxTextureFit(box) === "original"
+                      ? "按宽高比放入 UV，不拉扁、不强制铺满。"
+                      : "1:1 等比撑满 UV，多出裁掉。"}
+                  </p>
+                )}
+              </div>
             </div>
           )}
           {step === "render" && (
@@ -435,6 +441,18 @@ function BoxEditor({ box }: { box: PackagingBox }) {
                 剔除盒子以外（裁到盒子包围盒）
               </label>
               <div className="field">
+                <label>边缘倒角 {boxBevelMm(box).toFixed(1)} mm</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0.1, Math.min(box.lengthMm, box.widthMm, box.heightMm) / 4)}
+                  step={0.1}
+                  value={boxBevelMm(box)}
+                  onChange={(e) => patchBox((b) => ({ ...b, bevelMm: Number(e.target.value) }), "box-bevel")}
+                />
+                <p className="muted">0 为尖棱。调大后十二条棱变 smooth。</p>
+              </div>
+              <div className="field">
                 <label>分辨率</label>
                 <select
                   value={`${render.resolutionW}x${render.resolutionH}`}
@@ -468,6 +486,8 @@ function BoxEditor({ box }: { box: PackagingBox }) {
         heightMm={box.heightMm}
         onPatch={patchFace}
         onPatchAll={(faces) => patchBox((b) => ({ ...b, faces }))}
+        textureFit={boxTextureFit(box)}
+        textureTileScale={box.textureTileScale ?? 1}
       />
     </div>
   );

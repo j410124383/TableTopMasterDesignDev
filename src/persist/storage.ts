@@ -23,6 +23,7 @@ import {
 import { idbDelete, idbGet, idbSet } from "./idb";
 import {
   PATH_LOST,
+  copyProjectOnDisk,
   diskExists,
   diskList,
   diskMkdir,
@@ -393,6 +394,8 @@ export async function createProject(input: {
   /** 所选保存位置的完整路径，例如 F:\卡牌 */
   parentPath?: string;
   pathLabel?: string;
+  /** 复制为新工程时，源工程的本机文件夹（有则整目录拷贝） */
+  sourcePath?: string;
 }): Promise<{ project: Project; entry: AppIndexEntry }> {
   const parentPath = (input.parentPath ?? input.pathLabel)?.trim() || "";
   if (!looksLikeFullPath(parentPath)) {
@@ -460,16 +463,28 @@ export async function createProject(input: {
   } else {
     await diskMkdir(localPath);
     const listing = await diskList(localPath);
-    const occupied =
+    const hasMarker =
       listing &&
-      (listing.files.some((n) => n.endsWith(".ceditor") || n === "project.json") || listing.dirs.includes("data"));
-    if (occupied) {
+      listing.files.some((n) => n.endsWith(".ceditor") || n === "project.json");
+    const hasDataProject = await diskExists(`${localPath.replace(/[\\/]+$/, "")}\\data\\project.json`);
+    if (hasMarker || hasDataProject) {
       throw new Error("该路径已是 TMD 工程。请改用「打开项目」，或换一个名称。");
     }
     if (!input.makeSubfolder && listing && listing.files.length + listing.dirs.length > 2) {
       throw new Error("所选文件夹不是空目录。请勾选创建同名子文件夹，或换一个空目录。");
     }
-    await writeProjectToDisk(localPath, project);
+    const sourcePath = (input.sourcePath ?? "").trim();
+    if (input.fromProject && looksLikeFullPath(sourcePath) && sourcePath.replace(/[\\/]+$/, "").toLowerCase() !== localPath.replace(/[\\/]+$/, "").toLowerCase()) {
+      await copyProjectOnDisk(sourcePath, localPath, {
+        id: project.meta.id,
+        name: project.meta.name,
+        note: project.meta.note,
+      });
+      const fromDisk = await readProjectFromDisk(localPath);
+      if (fromDisk) project = validateProject(fromDisk);
+    } else {
+      await writeProjectToDisk(localPath, project);
+    }
   }
 
   await cacheProject(project);

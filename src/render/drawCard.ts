@@ -546,6 +546,8 @@ export type RenderOptions = {
   honorVisibleWhen?: boolean;
   /** 试玩/桌面：裁掉出血，只输出成品 trim 尺寸 */
   cropBleed?: boolean;
+  /** 缺省 true，与原先圆角裁切一致；false 为直角 */
+  roundCorners?: boolean;
 };
 
 export async function renderCardToCanvas(
@@ -565,7 +567,9 @@ export async function renderCardToCanvas(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, size.width, size.height);
   ctx.save();
-  clipRoundRect(ctx, 0, 0, size.width, size.height, size.radius);
+  if (options.roundCorners !== false) {
+    clipRoundRect(ctx, 0, 0, size.width, size.height, size.radius);
+  }
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, size.width, size.height);
 

@@ -1,7 +1,9 @@
 import { uid } from "@/lib/id";
 import { fieldKeysFromLayers, fieldTypesFromLayers } from "./layerVars";
 import { ensureCardSetViews } from "./cardSetView";
-import type { Blueprint, CardSet, Deck, PieceKind, Project, Template } from "./types";
+import { applySpecToBlueprint, ensurePieceSpecs } from "./pieceSpec";
+import { CARD_STOCK_MM } from "./piece";
+import type { Blueprint, CardSet, Deck, PieceOrientation, PieceSpec, Project, Template } from "./types";
 import { ensureBoxFaces } from "./box";
 
 export function templateFromBlueprint(bp: Blueprint, face: "front" | "back"): Template {
@@ -96,7 +98,9 @@ export function syncDerived(project: Project): Project {
     blueprints,
     sets,
     boxes: (project.boxes ?? []).map(ensureBoxFaces),
+    shots: project.shots ?? [],
     rulebooks: project.rulebooks ?? [],
+    pieceSpecs: project.pieceSpecs ?? [],
     templates: templatesFromBlueprints(blueprints),
     decks: decksFromSets(sets),
   };
@@ -111,52 +115,62 @@ export function normalizeProject(project: Project): Project {
   if (!sets.length && project.decks?.length) {
     sets = setsFromDecks(project.decks, blueprints);
   }
-  return syncDerived({
-    ...project,
-    blueprints,
-    sets,
-    boxes: project.boxes ?? [],
-    rulebooks: project.rulebooks ?? [],
-  });
+  return syncDerived(
+    ensurePieceSpecs({
+      ...project,
+      blueprints,
+      sets,
+      boxes: project.boxes ?? [],
+      shots: project.shots ?? [],
+      rulebooks: project.rulebooks ?? [],
+      pieceSpecs: project.pieceSpecs ?? [],
+    }),
+  );
 }
 
 function normalizeBlueprint(bp: Blueprint): Blueprint {
   const kind = bp.kind === "board" ? "board" : "card";
-  if (kind === "card") {
-    return { ...bp, kind, thicknessMm: undefined };
-  }
   const t = Number(bp.thicknessMm);
-  return { ...bp, kind, thicknessMm: Number.isFinite(t) && t >= 0 ? t : 2 };
-}
-
-export function createBlueprint(
-  name: string,
-  size: Project["meta"]["defaultSize"],
-  from?: Blueprint,
-  kind: PieceKind = "card",
-): Blueprint {
-  if (from) {
-    const copy = structuredClone(from);
-    const nextKind = copy.kind === "board" ? "board" : kind;
+  if (kind === "card") {
     return {
-      ...copy,
-      id: uid("bp"),
-      name,
-      kind: nextKind,
-      thicknessMm: nextKind === "board" ? (copy.thicknessMm ?? 2) : undefined,
+      ...bp,
+      kind,
+      thicknessMm: Number.isFinite(t) && t > 0 ? t : CARD_STOCK_MM,
+      core: bp.core === "black" ? "black" : "white",
     };
   }
-  return {
-    id: uid("bp"),
-    name,
-    kind,
-    size: { ...size },
-    thicknessMm: kind === "board" ? 2 : undefined,
-    bleedMm: 3,
-    cornerRadiusMm: 3,
-    frontLayers: [],
-    backLayers: [],
-  };
+  return { ...bp, kind, thicknessMm: Number.isFinite(t) && t >= 0 ? t : 2, core: undefined };
+}
+
+export function createBlueprint(name: string, spec: PieceSpec, orientation: PieceOrientation = "portrait", from?: Blueprint): Blueprint {
+  if (from) {
+    const copy = structuredClone(from);
+    return applySpecToBlueprint(
+      {
+        ...copy,
+        id: uid("bp"),
+        name,
+      },
+      spec,
+      orientation,
+    );
+  }
+  return applySpecToBlueprint(
+    {
+      id: uid("bp"),
+      name,
+      kind: spec.kind,
+      size: spec.size,
+      thicknessMm: spec.thicknessMm,
+      core: spec.core,
+      bleedMm: spec.bleedMm,
+      cornerRadiusMm: spec.cornerRadiusMm,
+      frontLayers: [],
+      backLayers: [],
+    },
+    spec,
+    orientation,
+  );
 }
 
 export function createCardSet(name: string, blueprintId: string, fieldKeys: string[]): CardSet {

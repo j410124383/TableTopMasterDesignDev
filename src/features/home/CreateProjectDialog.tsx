@@ -27,7 +27,7 @@ type Props = {
   initialFolder?: PickedFolder | null;
   onFolderPicked?: (folder: PickedFolder) => void;
   /** 从案例 / 订阅 / 已有工程写入一个全新的本地文件夹 */
-  cloneSource?: { name: string; project: Project };
+  cloneSource?: { name: string; project: Project; sourcePath?: string };
   onCreate: (input: {
     name: string;
     note?: string;
@@ -39,6 +39,7 @@ type Props = {
     makeSubfolder: boolean;
     parentPath?: string;
     pathLabel?: string;
+    sourcePath?: string;
   }) => Promise<void>;
 };
 
@@ -180,6 +181,7 @@ export function CreateProjectDialog({
         coverAsset: cover,
         starter: isClone ? "empty" : starter,
         fromProject: cloneSource?.project,
+        sourcePath: cloneSource?.sourcePath,
         handle: folder?.handle,
         makeSubfolder,
         parentPath: parentPath.trim(),

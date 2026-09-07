@@ -13,7 +13,7 @@
 | 构建 | Vite 7 | 开发端口 1420 |
 | 桌面壳 | Tauri 2（可选） | `src-tauri/`，Node FS 扩展 |
 | 联机 | PeerJS | WebRTC 点对点，辅以房间 API |
-| 导出 | pdf-lib、pngjs | PDF 拼版、PNG 批量 |
+| 导出 | pdf-lib、Canvas / pngjs | PDF 拼版；PNG / JPG 光栅（页图或单卡） |
 | PSD | ag-psd | 导入 Photoshop 图层 |
 | 包装盒 3D | WebGL | 方盒预览、UV 壳、产品渲染静帧 |
 
@@ -23,12 +23,12 @@
 
 ```
 桌游创作
-├── 卡牌 / 板件     蓝图库预览块 → 编辑；数据集、卡组
+├── 卡牌 / 板件     规格预览块；蓝图库预览块 → 编辑；数据集、卡组
 ├── 包装盒         包装库预览块 → 结构 / UV / 渲染
 └── 说明书         规则书（编辑器细节待补）
 ```
 
-项目级：变量、媒体、舞台（试玩）、打印、设置。打印主要服务卡牌/板件。
+项目级：变量、媒体、舞台（试玩）、**产品渲染**（场景库预览块 → 内部编辑）、打印、设置。打印主要服务卡牌/板件；产品渲染出宣传/实物静帧。
 
 ## 路由与页面地图
 
@@ -44,6 +44,7 @@
   sets            SetsPage          数据集浏览
   deck            DeckPage          卡组表格
   box             BoxPage           包装盒：结构 / 贴图 / 渲染
+  shot            ProductShotPage   产品渲染：场景库 → 内部编辑（卡/板/盒同场景）
   manual          ManualPage        说明书占位
   vars            VarsPage          项目变量
   media           MediaPage         媒体库
@@ -112,7 +113,7 @@ flowchart TD
   Resolve --> DrawCard[drawCard.ts]
   DrawCard --> SetPreview[卡牌集/Deck 预览]
   DrawCard --> Cache[cardCache 缓存]
-  DrawCard --> Export[PDF/PNG导出]
+  DrawCard --> Export[PDF/PNG/JPG导出]
   DrawCard --> PlayThumb[对战缩略图]
 ```
 
@@ -137,6 +138,11 @@ flowchart TD
 - 绝对路径读写
 - 资源管理器选文件夹
 - `/__fs/` 静态服务本地文件
+
+### 本机偏好（不进项目）
+
+- 分栏宽度、主题、语言等：localStorage
+- **导出参数预设**（`ExportPreset[]`）：localStorage，见 [print-export.md](./features/print-export.md)；读取后写入当前 `Project.print`
 
 ### 遗留兼容
 

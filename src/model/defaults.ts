@@ -1,9 +1,10 @@
 import { uid, nowIso } from "@/lib/id";
-import { syncDerived } from "./normalize";
+import { normalizeProject } from "./normalize";
 import { buildStarterContent, type StarterId } from "./starters";
 import {
   PROJECT_SCHEMA_VERSION,
   type Deck,
+  type PrintSettings,
   type Project,
   type SizeMm,
 } from "./types";
@@ -22,7 +23,7 @@ export function createEmptyProject(input: {
   const starter = input.starter ?? "empty";
   const { blueprints, sets, assets } = buildStarterContent(starter, input.size, input.name);
 
-  return syncDerived({
+  return normalizeProject({
     schemaVersion: PROJECT_SCHEMA_VERSION,
     meta: {
       id,
@@ -38,7 +39,9 @@ export function createEmptyProject(input: {
     blueprints,
     sets,
     boxes: [],
+    shots: [],
     rulebooks: [],
+    pieceSpecs: [],
     assets: assets ?? {},
     variables: [{ id: uid("var"), tag: "力量", replacement: "3", kind: "text" }],
     fonts: [],
@@ -67,7 +70,7 @@ export function createDeck(
   };
 }
 
-export const DEFAULT_PRINT = {
+export const DEFAULT_PRINT: PrintSettings = {
   paper: "a4" as const,
   orientation: "portrait" as const,
   customW: 210,
@@ -86,6 +89,21 @@ export const DEFAULT_PRINT = {
   mode: "print" as const,
   ttsCols: 10,
   ttsRows: 8,
+  formats: ["png"],
+  jpgQuality: 90,
+  roundCorners: true,
+  includeBleed: false,
+  cardStroke: false,
+  cardStrokeColor: "#111111",
+  cardStrokeMm: 0.4,
+  parallelStroke: false,
+  parallelStrokeColor: "#c9a227",
+  parallelStrokeMm: 0.35,
+  parallelStrokeInsetMm: 1.2,
+  watermark: false,
+  watermarkText: "",
+  watermarkOpacity: 30,
+  watermarkType: "single" as const,
 };
 
 export const DEFAULT_VIEWPORT = {

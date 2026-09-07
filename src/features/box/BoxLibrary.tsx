@@ -6,6 +6,7 @@ import { useAppStore } from "@/store/appStore";
 import { useEditorStore } from "@/store/editorStore";
 import { ContextMenu, type MenuItem } from "@/ui/ContextMenu";
 import { BoxViewport } from "./BoxViewport";
+import { HelpTip } from "@/ui/HelpTip";
 
 function mmToCm(n: number) {
   return Math.round((n / 10) * 100) / 100;
@@ -74,10 +75,12 @@ export function BoxLibrary() {
 
   return (
     <div className="bp-library">
-      <div className="page-head">
-        <div>
+      <div className="page-head page-head-compact">
+        <div className="row" style={{ alignItems: "center", gap: 8 }}>
           <h1>包装盒</h1>
-          <p className="muted">点预览块进入编辑；更多操作用 ⋯ 或右键。空库不会自动建盒。</p>
+          <HelpTip>
+            <p>点预览块进入编辑；更多操作用 ⋯ 或右键。空库不会自动建盒。倒角在盒子结构/渲染页调。</p>
+          </HelpTip>
         </div>
         <div className="row">
           <button type="button" className="btn btn-primary" onClick={create}>

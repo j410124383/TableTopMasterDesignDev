@@ -106,14 +106,34 @@ export type Template = {
 
 export type PieceKind = "card" | "board";
 
+export type CardCore = "white" | "black";
+
+export type PieceOrientation = "portrait" | "landscape";
+
+export type PieceSpec = {
+  id: string;
+  name: string;
+  kind: PieceKind;
+  /** 竖放基准：宽=短边、高=长边 */
+  size: SizeMm;
+  thicknessMm: number;
+  core?: CardCore;
+  bleedMm: number;
+  cornerRadiusMm: number;
+};
+
 export type Blueprint = {
   id: string;
   name: string;
-  /** 缺省视为卡牌。卡牌无厚度；板件可设 thicknessMm */
+  /** 缺省视为卡牌 */
   kind?: PieceKind;
+  specId?: string;
+  orientation?: PieceOrientation;
   size: SizeMm;
-  /** 仅板件。卡牌忽略 */
+  /** 卡牌：纸厚，默认 0.32；板件：板厚，默认 2。与规格同步的副本 */
   thicknessMm?: number;
+  /** 仅卡牌。白芯侧边白灰；黑芯深灰。缺省 white */
+  core?: CardCore;
   bleedMm: number;
   cornerRadiusMm: number;
   frontLayers: Layer[];
@@ -180,6 +200,7 @@ export type ProjectMeta = {
   createdAt: string;
   updatedAt: string;
   defaultSize: SizeMm;
+  defaultSpecId?: string;
 };
 
 export type PlaySetupSnapshot = {
@@ -192,9 +213,11 @@ export type Project = {
   meta: ProjectMeta;
   templates: Template[];
   decks: Deck[];
+  pieceSpecs?: PieceSpec[];
   blueprints: Blueprint[];
   sets: CardSet[];
   boxes?: PackagingBox[];
+  shots?: ProductShot[];
   rulebooks?: Rulebook[];
   assets: Record<string, string>;
   variables: ProjectVariable[];
@@ -223,6 +246,8 @@ export type BoxRenderSetup = {
   position: { x: number; y: number; z: number };
   rotationDeg: { x: number; y: number; z: number };
   camera: { yaw: number; pitch: number; distance: number; fov: number };
+  /** 透视=透视投影；等距=正交。缺省 perspective */
+  projection?: "perspective" | "isometric";
   lights: {
     key: { yaw: number; pitch: number; intensity: number; color: string };
     fillIntensity?: number;
@@ -235,6 +260,8 @@ export type BoxRenderSetup = {
   resolutionH?: number;
 };
 
+export type TextureFit = "original" | "cover" | "tile";
+
 export type PackagingBox = {
   id: string;
   name: string;
@@ -242,8 +269,46 @@ export type PackagingBox = {
   widthMm: number;
   heightMm: number;
   textureAssetId?: string;
+  /** 贴图占满 UV 0–1。缺省 cover */
+  textureFit?: TextureFit;
+  textureTileScale?: number;
+  /** 棱边倒角 mm，缺省 0 */
+  bevelMm?: number;
   faces: Record<BoxFace, UvIsland>;
   render?: BoxRenderSetup;
+};
+
+export type ProductShotItem = {
+  id: string;
+  kind: "card" | "board" | "box" | "stack";
+  /** 布局槽位未填时为空字符串 */
+  refId: string;
+  setId?: string;
+  cardId?: string;
+  face?: "front" | "back";
+  position: { x: number; y: number; z: number };
+  rotationDeg: { x: number; y: number; z: number };
+  scale?: number;
+  slotId?: string;
+};
+
+export type ProductShotLook = {
+  outline?: { enabled: boolean; color: string; widthPx: number };
+  vignette?: number;
+  bloom?: number;
+  exposure?: number;
+  contrast?: number;
+  saturation?: number;
+  blur?: number;
+};
+
+export type ProductShot = {
+  id: string;
+  name: string;
+  items: ProductShotItem[];
+  render: BoxRenderSetup;
+  look?: ProductShotLook;
+  layoutId?: string;
 };
 
 export type Rulebook = {
@@ -273,6 +338,12 @@ export type AppIndex = {
 
 export type PaperId = "a4" | "letter" | "legal" | "tabloid" | "custom";
 
+export type ExportMode = "print" | "tts" | "single";
+
+export type RasterFormat = "png" | "jpg";
+
+export type WatermarkType = "single" | "tile";
+
 export type PrintSettings = {
   paper: PaperId;
   orientation: "portrait" | "landscape";
@@ -289,9 +360,32 @@ export type PrintSettings = {
   duplex: boolean;
   dpi: number;
   filename: string;
-  mode?: "print" | "tts";
-  ttsCols?: number;
-  ttsRows?: number;
+  mode: ExportMode;
+  ttsCols: number;
+  ttsRows: number;
+  formats: RasterFormat[];
+  jpgQuality: number;
+  roundCorners: boolean;
+  includeBleed: boolean;
+  cardStroke: boolean;
+  cardStrokeColor: string;
+  cardStrokeMm: number;
+  parallelStroke: boolean;
+  parallelStrokeColor: string;
+  parallelStrokeMm: number;
+  parallelStrokeInsetMm: number;
+  watermark: boolean;
+  watermarkText: string;
+  watermarkOpacity: number;
+  watermarkType: WatermarkType;
+};
+
+/** 本机导出参数预设，不进 project.json */
+export type ExportPreset = {
+  id: string;
+  name: string;
+  settings: PrintSettings;
+  updatedAt: string;
 };
 
 export type ViewportPrefs = {

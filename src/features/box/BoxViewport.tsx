@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { BoxFace, BoxRenderSetup, PackagingBox } from "@/model/types";
 import { BoxGl } from "./boxGl";
-import { loadBoxTexture } from "./boxTexture";
+import { loadFittedBoxTexture } from "./boxTexture";
 
 export function BoxViewport({
   box,
@@ -31,7 +31,7 @@ export function BoxViewport({
   const glRef = useRef<BoxGl | null>(null);
   const boxRef = useRef(box);
   const renderRef = useRef(render);
-  const texRef = useRef<HTMLImageElement | null>(null);
+  const texRef = useRef<HTMLImageElement | HTMLCanvasElement | null>(null);
   const faceRef = useRef(selectedFace);
   const transRef = useRef(transparentBg);
   const gizmosRef = useRef(gizmos);
@@ -107,7 +107,7 @@ export function BoxViewport({
       paint();
       return;
     }
-    void loadBoxTexture(textureSrc, projectDir)
+    void loadFittedBoxTexture(textureSrc, projectDir, box.textureFit ?? "cover", box.textureTileScale ?? 1)
       .then((img) => {
         if (dead) return;
         texRef.current = img;
@@ -124,7 +124,7 @@ export function BoxViewport({
     return () => {
       dead = true;
     };
-  }, [textureSrc, projectDir, box.textureAssetId]);
+  }, [textureSrc, projectDir, box.textureAssetId, box.textureFit, box.textureTileScale]);
 
   return (
     <div

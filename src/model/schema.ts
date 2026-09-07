@@ -33,7 +33,9 @@ export function validateProject(value: unknown): Project {
   if (!value.assets) value.assets = {};
   if (!Array.isArray(value.fonts)) value.fonts = [];
   if (!Array.isArray(value.boxes)) value.boxes = [];
+  if (!Array.isArray(value.shots)) value.shots = [];
   if (!Array.isArray(value.rulebooks)) value.rulebooks = [];
+  if (!Array.isArray(value.pieceSpecs)) value.pieceSpecs = [];
   const next = patchSanguoshaIdentityBacks(normalizeProject(value));
   if (!next.blueprints.length || !next.sets.length) {
     throw new Error("项目损坏：缺少蓝图或卡牌集");

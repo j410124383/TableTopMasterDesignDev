@@ -44,6 +44,8 @@ type EditorState = {
   specId: string | null;
   boxId: string | null;
   boxLibraryOpen: boolean;
+  shotId: string | null;
+  shotLibraryOpen: boolean;
   setSelected: (id: string | null) => void;
   setFace: (face: "front" | "back") => void;
   setClipboard: (layer: Layer | null) => void;
@@ -59,6 +61,9 @@ type EditorState = {
   setBoxId: (id: string | null) => void;
   setBoxLibraryOpen: (open: boolean) => void;
   openBox: (id: string) => void;
+  setShotId: (id: string | null) => void;
+  setShotLibraryOpen: (open: boolean) => void;
+  openShot: (id: string) => void;
   fitView: () => void;
   centerZoom: (zoom: number) => void;
   resetView: () => void;
@@ -77,6 +82,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   specId: null,
   boxId: null,
   boxLibraryOpen: true,
+  shotId: null,
+  shotLibraryOpen: true,
   previewDpi: readPreviewDpi(),
   setSelected: (selectedId) => set({ selectedId }),
   setFace: (face) => set({ face }),
@@ -97,6 +104,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setBoxId: (boxId) => set({ boxId }),
   setBoxLibraryOpen: (boxLibraryOpen) => set({ boxLibraryOpen }),
   openBox: (id) => set({ boxId: id, boxLibraryOpen: false }),
+  setShotId: (shotId) => set({ shotId }),
+  setShotLibraryOpen: (shotLibraryOpen) => set({ shotLibraryOpen }),
+  openShot: (id) => set({ shotId: id, shotLibraryOpen: false }),
   fitView: () => {
     const box = get().canvasBox;
     if (!box) return;
@@ -131,6 +141,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       specId: null,
       boxId: null,
       boxLibraryOpen: true,
+      shotId: null,
+      shotLibraryOpen: true,
       canvasBox: null,
     }),
 }));

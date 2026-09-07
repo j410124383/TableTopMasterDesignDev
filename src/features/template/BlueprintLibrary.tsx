@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { createBlueprint, createCardSet, fieldKeysOf, templateFromBlueprint } from "@/model/normalize";
+import { ensureSpecForKind, specOf } from "@/model/pieceSpec";
 import { useAppStore } from "@/store/appStore";
 import { useEditorStore } from "@/store/editorStore";
 import { ContextMenu, type MenuItem } from "@/ui/ContextMenu";
 import { CardThumb } from "./CardThumb";
 import { BlueprintSpec } from "./BlueprintSpec";
+import { HelpTip } from "@/ui/HelpTip";
 
 export function BlueprintLibrary() {
   const { current, patchProject } = useAppStore();
@@ -35,8 +37,16 @@ export function BlueprintLibrary() {
       : kind === "board"
         ? `板件 ${blueprints.length + 1}`
         : `卡牌 ${blueprints.length + 1}`;
-    const next = createBlueprint(name, current!.meta.defaultSize, from, kind);
-    patchProject((p) => ({ ...p, blueprints: [...p.blueprints, next] }));
+    patchProject((p) => {
+      const ready = ensureSpecForKind(p, from?.kind === "board" || kind === "board" ? "board" : "card");
+      const spec = from?.specId ? specOf(ready.project, from.specId) ?? ready.spec : ready.spec;
+      const next = createBlueprint(name, spec, from?.orientation ?? "portrait", from);
+      return {
+        ...ready.project,
+        blueprints: [...ready.project.blueprints, next],
+        meta: { ...ready.project.meta, defaultSpecId: spec.id },
+      };
+    });
   }
 
   function rename(id: string, name: string) {
@@ -92,10 +102,12 @@ export function BlueprintLibrary() {
 
   return (
     <div className="bp-library">
-      <div className="page-head">
-        <div>
+      <div className="page-head page-head-compact">
+        <div className="row" style={{ alignItems: "center", gap: 8 }}>
           <h1>蓝图</h1>
-          <p className="muted">点「打开」进入编辑；更多操作用 ⋯ 或右键。</p>
+          <HelpTip>
+            <p>点「打开」进入图层编辑；更多操作用 ⋯ 或右键。物理尺寸在「卡牌规格」里改，蓝图只选规格和横竖。</p>
+          </HelpTip>
         </div>
         <div className="row">
           <button type="button" className="btn btn-primary" onClick={() => create(undefined, "card")}>
@@ -152,10 +164,11 @@ export function BlueprintLibrary() {
                   <h3>{bp.name}</h3>
                 )}
                 <p className="muted">
-                  {bp.kind === "board" ? "板件" : "卡牌"}
-                  {bp.kind === "board" ? ` · ${bp.thicknessMm ?? 2} mm 厚` : ""}
-                  {" · "}
-                  {bp.size.w}×{bp.size.h} mm · {layers} 图层
+                  {(() => {
+                    const spec = specOf(current, bp.specId);
+                    const ori = bp.orientation === "landscape" ? "横放" : "竖放";
+                    return `${bp.kind === "board" ? "板件" : "卡牌"} · ${spec?.name ?? "规格"} · ${ori} · ${bp.size.w}×${bp.size.h} mm · ${layers} 图层`;
+                  })()}
                 </p>
                 <div className="card-actions bp-tile-actions">
                   <button type="button" className="btn btn-small btn-primary" onClick={() => enter(bp.id)}>

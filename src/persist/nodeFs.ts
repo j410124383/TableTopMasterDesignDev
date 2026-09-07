@@ -12,7 +12,7 @@ export function folderNameOf(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-async function post<T>(url: string, body: unknown): Promise<{ ok: boolean; status: number; data: T | null }> {
+async function post<T>(url: string, body: unknown): Promise<{ ok: boolean; status: number; data: T | null; error?: string }> {
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -20,10 +20,17 @@ async function post<T>(url: string, body: unknown): Promise<{ ok: boolean; statu
       body: JSON.stringify(body),
     });
     if (res.status === 204) return { ok: true, status: 204, data: null };
-    if (!res.ok) return { ok: false, status: res.status, data: null };
-    return { ok: true, status: res.status, data: (await res.json()) as T };
-  } catch {
-    return { ok: false, status: 0, data: null };
+    const text = await res.text();
+    let data: T | null = null;
+    try {
+      data = text ? (JSON.parse(text) as T) : null;
+    } catch {
+      data = null;
+    }
+    if (!res.ok) return { ok: false, status: res.status, data, error: text || `HTTP ${res.status}` };
+    return { ok: true, status: res.status, data };
+  } catch (err) {
+    return { ok: false, status: 0, data: null, error: err instanceof Error ? err.message : "网络错误" };
   }
 }
 
@@ -55,7 +62,18 @@ export async function diskList(path: string): Promise<{ files: string[]; dirs: s
 
 export async function writeProjectToDisk(dir: string, project: Project): Promise<void> {
   const res = await post("/__fs/write-project", { path: dir, project });
-  if (!res.ok) throw new Error("无法写入本机文件夹。请重新选择保存位置。");
+  if (!res.ok) throw new Error(res.error?.slice(0, 240) || "无法写入本机文件夹。请重新选择保存位置。");
+}
+
+export async function copyProjectOnDisk(
+  from: string,
+  to: string,
+  meta: { id: string; name: string; note?: string },
+): Promise<void> {
+  const res = await post("/__fs/copy-project", { path: to, from, meta });
+  if (!res.ok) {
+    throw new Error(res.error?.slice(0, 240) || "无法复制工程文件夹。请确认源路径仍在，并换一个保存位置。");
+  }
 }
 
 /** 写入任意二进制到本机路径（base64），返回可显示的 /__fs/file URL */

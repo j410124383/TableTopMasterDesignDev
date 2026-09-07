@@ -1,6 +1,6 @@
 import { DEFAULT_PRINT } from "@/model/defaults";
 import { validateProject } from "@/model/schema";
-import type { Blueprint, CardSet, Deck, PackagingBox, PrintSettings, Project, ProjectMeta, Rulebook, Template } from "@/model/types";
+import type { Blueprint, CardSet, Deck, PackagingBox, PieceSpec, PrintSettings, ProductShot, Project, ProjectMeta, Rulebook, Template } from "@/model/types";
 import {
   ensureSubdir,
   fileExists,
@@ -198,6 +198,14 @@ export async function writeProjectToFolder(
     "export.json",
     JSON.stringify(project.print ?? DEFAULT_PRINT, null, 2),
   );
+  const specDir = await ensureSubdir(data, "piece-specs");
+  const keepSpec = new Set((project.pieceSpecs ?? []).map((s) => `${s.id}.json`));
+  for (const name of await listFileNames(specDir)) {
+    if (name.endsWith(".json") && !keepSpec.has(name)) await removeFile(specDir, name);
+  }
+  for (const spec of project.pieceSpecs ?? []) {
+    await writeTextFile(specDir, `${spec.id}.json`, JSON.stringify(spec, null, 2));
+  }
   const boxDir = await ensureSubdir(data, "boxes");
   const keepBox = new Set((project.boxes ?? []).map((b) => `${b.id}.json`));
   for (const name of await listFileNames(boxDir)) {
@@ -205,6 +213,14 @@ export async function writeProjectToFolder(
   }
   for (const box of project.boxes ?? []) {
     await writeTextFile(boxDir, `${box.id}.json`, JSON.stringify(box, null, 2));
+  }
+  const shotDir = await ensureSubdir(data, "shots");
+  const keepShot = new Set((project.shots ?? []).map((s) => `${s.id}.json`));
+  for (const name of await listFileNames(shotDir)) {
+    if (name.endsWith(".json") && !keepShot.has(name)) await removeFile(shotDir, name);
+  }
+  for (const shot of project.shots ?? []) {
+    await writeTextFile(shotDir, `${shot.id}.json`, JSON.stringify(shot, null, 2));
   }
   await writeTextFile(data, "rulebooks.json", JSON.stringify(project.rulebooks ?? [], null, 2));
 }
@@ -268,12 +284,28 @@ export async function readProjectFromFolder(
       const assetIndex = data
         ? ((JSON.parse((await tryReadText(data, "assets.json")) || "{}") as Record<string, string>))
         : {};
+      const pieceSpecs: PieceSpec[] = [];
+      const specDir = data ? await tryGetDir(data, "piece-specs") : null;
+      if (specDir) {
+        for (const name of await listFileNames(specDir)) {
+          if (!name.endsWith(".json")) continue;
+          pieceSpecs.push(JSON.parse(await readTextFile(specDir, name)) as PieceSpec);
+        }
+      }
       const boxes: PackagingBox[] = [];
       const boxDir = data ? await tryGetDir(data, "boxes") : null;
       if (boxDir) {
         for (const name of await listFileNames(boxDir)) {
           if (!name.endsWith(".json")) continue;
           boxes.push(JSON.parse(await readTextFile(boxDir, name)) as PackagingBox);
+        }
+      }
+      const shots: ProductShot[] = [];
+      const shotDir = data ? await tryGetDir(data, "shots") : null;
+      if (shotDir) {
+        for (const name of await listFileNames(shotDir)) {
+          if (!name.endsWith(".json")) continue;
+          shots.push(JSON.parse(await readTextFile(shotDir, name)) as ProductShot);
         }
       }
       const rulebooks = data
@@ -302,11 +334,13 @@ export async function readProjectFromFolder(
         decks,
         blueprints,
         sets,
+        pieceSpecs,
         assets,
         variables,
         fonts,
         print,
         boxes,
+        shots,
         rulebooks,
       });
     }

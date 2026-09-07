@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { BoxFace, UvIsland } from "@/model/types";
 import { BOX_FACES, defaultUvNet, FACE_LABEL } from "@/model/box";
+import { SplitHandle, usePaneSize } from "@/ui/Splitter";
 import { UvEditor } from "./UvEditor";
 
 export function BoxUvPanel({
@@ -16,6 +17,8 @@ export function BoxUvPanel({
   onPatch,
   onPatchAll,
   projectDir,
+  textureFit,
+  textureTileScale,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,10 +32,13 @@ export function BoxUvPanel({
   heightMm: number;
   onPatch: (face: BoxFace, patch: Partial<UvIsland>, merging?: boolean) => void;
   onPatchAll: (faces: Record<BoxFace, UvIsland>) => void;
+  textureFit?: "original" | "cover" | "tile";
+  textureTileScale?: number;
 }) {
   const faceIdx = BOX_FACES.indexOf(face);
   const island = faces[face];
   const [snap, setSnap] = useState(true);
+  const [sideW, setSideW] = usePaneSize("uv-side", 280);
   const uniform = island.uniformScale !== false;
   const sx = island.scaleX ?? 1;
   const sy = island.scaleY ?? 1;
@@ -80,7 +86,7 @@ export function BoxUvPanel({
             完成
           </button>
         </header>
-        <div className="box-uv-body">
+        <div className="box-uv-body" style={{ ["--uv-side" as string]: `${sideW}px` }}>
           <UvEditor
             faces={faces}
             textureUrl={textureUrl}
@@ -89,7 +95,10 @@ export function BoxUvPanel({
             onPatch={(f, patch, merging) => onPatch(f, patch, merging)}
             projectDir={projectDir}
             snap={snap}
+            textureFit={textureFit}
+            textureTileScale={textureTileScale}
           />
+          <SplitHandle onDelta={(dx) => setSideW(Math.min(480, Math.max(200, sideW - dx)))} />
           <aside className="box-uv-side">
             <div className="row">
               <button type="button" className="btn btn-small" onClick={tools.prevFace}>

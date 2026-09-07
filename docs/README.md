@@ -46,15 +46,16 @@
 
 桌游创作三个维度：
 
-- [pieces.md](./features/pieces.md) — 卡牌 / 板件（蓝图与数据集所在维度；卡牌无厚度，板件可设厚度）
-- [packaging.md](./features/packaging.md) — 包装盒（方盒参数、一张贴图、每面 UV 壳、产品渲染）
+- [pieces.md](./features/pieces.md) — 卡牌 / 板件（规格预览块、蓝图与数据集；卡牌纸厚与卡芯、板件板厚写在规格上）
+- [packaging.md](./features/packaging.md) — 包装盒（方盒参数、一张贴图与铺法、棱倒角、每面 UV 壳、单盒渲染）
+- [product-render.md](./features/product-render.md) — 产品渲染（场景库、透视/等距、控制杆、布局模版、描边与滤镜）
 - [rulebook.md](./features/rulebook.md) — 说明书
 
 卡牌/板件内的现有能力：
 
 - [template-editor.md](./features/template-editor.md) — 蓝图编辑、图层、变量绑定
 - [sets-and-deck.md](./features/sets-and-deck.md) — 数据集浏览、卡组表格编辑
-- [print-export.md](./features/print-export.md) — 拼版、PDF/PNG 导出
+- [print-export.md](./features/print-export.md) — 打印拼版 / TTS / 单图；PDF 与 PNG/JPG 导出
 
 其它：
 

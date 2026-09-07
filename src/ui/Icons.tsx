@@ -235,6 +235,12 @@ export const IconPrint = (p: IconProps) => (
     <path d="M8 17h8v3H8z" />
   </Svg>
 );
+export const IconShot = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 9h3l1.5-2h7L17 9h3v10H4z" />
+    <circle cx="12" cy="14" r="3.2" />
+  </Svg>
+);
 export const IconGear = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="3" />
@@ -333,6 +339,11 @@ export const IconErase = (p: IconProps) => (
   <Svg {...p}>
     <path d="m6 15 7-7 5 5-7 7H6z" />
     <path d="M4 20h16" />
+  </Svg>
+);
+export const IconSpec = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="6.5" y="3" width="11" height="18" rx="2.4" />
   </Svg>
 );
 export const IconBleed = (p: IconProps) => (
