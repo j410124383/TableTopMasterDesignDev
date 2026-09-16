@@ -62,7 +62,7 @@
 
 - [play-mode.md](./features/play-mode.md) — 对战、联机、牌桌
 - [workspace-home.md](./features/workspace-home.md) — 首页、项目、工作区
-- [offline-pack.md](./features/offline-pack.md) — Windows / Mac 离线 zip（解压双击启动，内置 Node）
+- [offline-pack.md](./features/offline-pack.md) — Windows / Mac 离线 zip（解压双击启动，内置 Node）；对外发版走 GitHub Releases
 - [desktop-app.md](./features/desktop-app.md) — 日常用 TMD 窗口，不经系统浏览器；为后期序列帧打底
 - [market-community.md](./features/market-community.md) — 市场、论坛、新闻
 - [ui-consistency.md](./features/ui-consistency.md) — 颜色、文件导入、次级界面等 UI 约定

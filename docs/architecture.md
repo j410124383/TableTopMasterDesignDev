@@ -172,6 +172,8 @@ flowchart TD
 
 zip 启动入口：Windows 为 **TMD.exe**（bat 后备）；Mac 仍是 `.command`。窗口壳是 WebView2 + Node sidecar。Mac `.app` 不能在 Windows 上交叉编译。规格见 [offline-pack.md](./features/offline-pack.md)、[desktop-app.md](./features/desktop-app.md)。
 
+给纯使用者的版本包体走 **GitHub Releases**（同一源码仓库，不另开仓，zip 不进 git）。步骤见 [offline-pack.md 对外发版](./features/offline-pack.md#对外发版github-releases)。
+
 ## 开发命令
 
 ```bash

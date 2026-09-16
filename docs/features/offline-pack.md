@@ -73,6 +73,52 @@ npm run pack
 
 不必单独再跑 `pack:mac`；若实现成分命令，`pack` 仍须打齐两份。
 
+## 对外发版（GitHub Releases）
+
+给**纯使用者**下包：用源码仓库的 **Releases**，不要另开仓库，也不要把 zip / exe 提交进 git（包体大会把仓库拉得很慢）。
+
+- 源码仓库：https://github.com/j410124383/TableTopMasterDesignDev
+- 使用者下载页：https://github.com/j410124383/TableTopMasterDesignDev/releases
+- 每个版本一个 Release，Tag 与 `package.json` 的 `version` 对齐，例如 `v0.3.24`
+- 附件只挂打包产物：`TMD-offline.zip`、`TMD-offline-mac.zip`（文件名不要改）
+
+开发者仍 `git clone` / `git pull` 源码；使用者只打开 Releases，点附件，不必装 git、不必看代码。
+
+### 发一版（Windows 开发机）
+
+1. `package.json` 的 `version` 已是本版号（桌面工程若单独写版本，一并改齐）。
+2. 源码已 commit，并 `git push` 到 `main`。
+3. 在仓库根执行：
+
+```bash
+npm run pack
+```
+
+产物在 `release/TMD-offline.zip` 与 `release/TMD-offline-mac.zip`（同时会复制到 `public/`，供本机落地页下载；那是开发站用的，**不是**对外发版）。
+
+4. 建 GitHub Release，把两份 zip 挂上。任选一种：
+
+**命令行**（已安装 [GitHub CLI](https://cli.github.com/) 且 `gh auth login` 过）：
+
+```bash
+gh release create v0.3.24 --repo j410124383/TableTopMasterDesignDev --title "桌游大师 v0.3.24" --notes "Windows 解压后双击 TMD.exe；Mac（Apple 芯片）解压后双击「打开卡牌工坊.command」。" release/TMD-offline.zip release/TMD-offline-mac.zip
+```
+
+把 `v0.3.24` 换成当前 `package.json` 版本。若该 tag 已存在，不要重复创建，应改版本号再发。
+
+**网页**：打开仓库 → **Releases** → **Draft a new release** → Tag 填 `v0.3.24`（指向刚才推上去的 `main`）→ 标题写版本 → 上传两个 zip → **Publish release**。
+
+5. 把 Releases 链接发给使用者。说明仍按上文「落地页」三步（解压成文件夹再双击，不要在压缩包里直接开）。
+
+### 不要做
+
+- 不要 `git add release/` 或 `public/*.zip`（已在 `.gitignore`）
+- 不要为包体再建一个 git 仓库
+- 不要把开发用的 `node_modules`、`.tmd-webview` 打进附件
+- 同一版本号不要发两次；修包先升 `package.json` 版本再 pack
+
+国内从 GitHub 下 zip 若过慢，可另外拷到网盘；网盘不是版本真相，以 Releases 的 tag 为准。
+
 ## Mac 启动脚本
 
 `打开卡牌工坊.command`：
@@ -95,6 +141,9 @@ npm run pack
 - [ ] Mac 包可在 Apple 芯片 Mac 上解压后启动，浏览器打开 `http://localhost:1420/`，不必预先安装 Node
 - [ ] 落地页与首页能分别下载两份；缺文件的按钮禁用并说明原因
 - [ ] Mac 使用说明写明右键打开、chmod、用 Chrome/Edge
+- [ ] 对外发版走同一仓库 GitHub Releases；附件为两份离线 zip；zip / exe 不进 git
+- [ ] Release tag 与 `package.json` 的 `version` 一致（`v` + 版本号）
+- [ ] 使用者打开 `/releases` 即可下载，不必克隆仓库
 
 ## 已知限制 / 不做
 
@@ -102,9 +151,11 @@ npm run pack
 - 不做签名应用；Gatekeeper 可能拦第一次打开
 - Safari 的文件夹选取能力弱，Mac 试用以 Chrome / Edge 为准
 - 不在 Windows 上交叉编译 Tauri `.app`
+- 不为包体另开 git 仓库；不把 zip 提交进 git 历史
 
 ## 变更记录
 
 | 日期 | 说明 |
 |------|------|
 | 2026-09-10 | 新增 Mac（Apple 芯片）离线 zip；Windows 上一次 pack 打出两份 |
+| 2026-09-16 | 对外发版：同一仓库 GitHub Releases 挂 zip，不另开仓、zip 不进 git |
