@@ -11,11 +11,11 @@
 | 卡牌渲染 | Canvas 2D API | `src/render/drawCard.ts` 离屏绘制，用于预览/导出/对战缩略图 |
 | 状态 | Zustand | 见下方 Store 分工 |
 | 构建 | Vite 7 | 开发端口 1420 |
-| 桌面壳 | Tauri 2（可选） | `src-tauri/`，Node FS 扩展 |
+| 桌面壳 | Tauri 2 + 现有 Node 本地服务 | 日常用 TMD **窗口**，不经系统浏览器。见 [desktop-app.md](./features/desktop-app.md) |
 | 联机 | PeerJS | WebRTC 点对点，辅以房间 API |
 | 导出 | pdf-lib、Canvas / pngjs | PDF 拼版；PNG / JPG 光栅（页图或单卡） |
 | PSD | ag-psd | 导入 Photoshop 图层 |
-| 包装盒 3D | WebGL | 方盒预览、UV 壳、产品渲染静帧 |
+| 包装盒 3D | WebGL | 方盒预览、UV 壳、产品渲染静帧；后期转台序列帧 |
 
 ## 产品信息架构（已确认）
 
@@ -23,12 +23,13 @@
 
 ```
 桌游创作
-├── 卡牌 / 板件     规格预览块；蓝图库预览块 → 编辑；数据集、卡组
+├── 卡牌           规格预览块；蓝图库预览块 → 编辑；数据集、卡组
+├── 板件           贴图扣形 + 厚度；库预览块
 ├── 包装盒         包装库预览块 → 结构 / UV / 渲染
 └── 说明书         规则书（编辑器细节待补）
 ```
 
-项目级：变量、媒体、舞台（试玩）、**产品渲染**（场景库预览块 → 内部编辑）、打印、设置。打印主要服务卡牌/板件；产品渲染出宣传/实物静帧。
+项目级：变量、媒体、舞台（试玩）、**产品渲染**（场景库预览块 → 内部编辑）、打印、设置。打印主要服务卡牌；产品渲染出宣传/实物静帧（含板件、盒）。
 
 ## 路由与页面地图
 
@@ -40,7 +41,8 @@
 /play             PlayPage          独立对战入口
 /market           MarketPage        市场（也可嵌入 HomePage）
 /project/*        WorkspaceLayout   项目工作区（需已打开项目）
-  template        TemplateEditor    蓝图编辑（属卡牌/板件）
+  template        TemplateEditor    蓝图编辑（属卡牌）
+  board           BoardPage         板件：库 → 贴图扣形 + 厚度
   sets            SetsPage          数据集浏览
   deck            DeckPage          卡组表格
   box             BoxPage           包装盒：结构 / 贴图 / 渲染
@@ -128,6 +130,7 @@ flowchart TD
 1. **IndexedDB** — 浏览器内缓存项目 JSON 与索引
 2. **文件夹格式** (`ceditor-folder-v1`) — 用户选定本地目录：
    - `project.json` — 元数据、蓝图、卡牌集（资产引用为相对路径）
+   - `data/boards/` — 板件（贴图扣形件）
    - `assets/` — 图片、字体等二进制
    - `.ceditor` — 格式标记
 
@@ -156,13 +159,28 @@ flowchart TD
 - **playSync** 同步牌桌状态（牌堆、手牌、道具、笔迹）
 - 详见 [play-mode.md](./features/play-mode.md)
 
+## 离线包与桌面窗口
+
+日常运行见 [desktop-app.md](./features/desktop-app.md)：TMD 窗口加载本机服务，**不再打开系统浏览器**。
+
+`npm run pack`（`scripts/pack.mjs`）仍可打两份解压 zip（试用 / 尚无安装包时），复制到 `public/`：
+
+| 产物 | 系统 | 内置运行时 |
+|------|------|------------|
+| `TMD-offline.zip` | Windows x64 | `vendor/node`（`node.exe`） |
+| `TMD-offline-mac.zip` | macOS Apple 芯片 | 包内 `darwin-arm64` Node（与 Windows 缓存目录分开，互不覆盖） |
+
+zip 启动入口：Windows 为 **TMD.exe**（bat 后备）；Mac 仍是 `.command`。窗口壳是 WebView2 + Node sidecar。Mac `.app` 不能在 Windows 上交叉编译。规格见 [offline-pack.md](./features/offline-pack.md)、[desktop-app.md](./features/desktop-app.md)。
+
 ## 开发命令
 
 ```bash
 npm run dev      # Vite 开发
-npm run start    # 0.0.0.0:1420 并打开浏览器
+npm run start    # 0.0.0.0:1420（开发机可开浏览器）
+npm run desktop:exe  # 编出仓库根目录 TMD.exe
 npm run build    # tsc + vite build
-npm run tauri    # Tauri 桌面构建
+npm run pack     # Windows + Mac 离线 zip → release/ 与 public/
+npm run tauri    # 可选 Tauri；日常 Windows 窗口是 TMD.exe
 ```
 
 ## 关键文件索引

@@ -1,6 +1,7 @@
 import { uid } from "@/lib/id";
 import type { ProductShot, ProductShotItem, Project } from "@/model/types";
 import { defaultLieRotation, placeYForItem } from "./shotResolve";
+import { itemFaceDown } from "./shotStack";
 
 export type ShotLayoutId = "empty" | "box-fan" | "box-row" | "box-stack-fan";
 
@@ -77,7 +78,9 @@ export function applyShotLayout(
   const prev = shot.items;
   const items: ProductShotItem[] = slots.map((slot) => {
     const old = keepFilled ? prev.find((it) => it.slotId === slot.slotId) : undefined;
-    const y = old?.refId ? placeYForItem(slot.kind, project, old.refId, old.setId) : slot.position.y;
+    const y = old?.refId
+      ? placeYForItem(slot.kind, project, old.refId, old.setId, old.stack, old.id, itemFaceDown(old))
+      : slot.position.y;
     return {
       id: old?.id ?? uid("sit"),
       kind: slot.kind,
@@ -89,6 +92,7 @@ export function applyShotLayout(
       rotationDeg: slot.rotationDeg,
       scale: old?.scale ?? 1,
       slotId: slot.slotId,
+      stack: old?.stack,
     };
   });
   return { ...shot, items, layoutId };
@@ -108,7 +112,15 @@ export function fillShotSlot(
     face: payload.face,
     position: {
       ...item.position,
-      y: placeYForItem(payload.kind, project, payload.refId, payload.setId),
+      y: placeYForItem(
+        payload.kind,
+        project,
+        payload.refId,
+        payload.setId,
+        item.stack,
+        item.id,
+        itemFaceDown({ ...item, ...payload }),
+      ),
     },
     rotationDeg: item.slotId ? item.rotationDeg : defaultLieRotation(payload.kind),
   };

@@ -1,5 +1,5 @@
-import { writeDiskBytes } from "@/persist/nodeFs";
-import { looksLikeFullPath } from "@/persist/storage";
+import { writeDiskBytes, diskMkdir } from "@/persist/nodeFs";
+import { looksLikeFullPath, revealInExplorer } from "@/persist/storage";
 
 function joinDisk(dir: string, rel: string) {
   return `${dir.replace(/[\\/]+$/, "")}\\${rel.replaceAll("/", "\\")}`;
@@ -46,4 +46,14 @@ export async function saveRenderPng(
   a.click();
   URL.revokeObjectURL(a.href);
   return "未绑定本机工程文件夹，已下载渲染图。绑定文件夹后会写入「渲染图」子目录。";
+}
+
+export async function openRenderFolder(currentPath: string | null | undefined): Promise<string> {
+  if (!currentPath || !looksLikeFullPath(currentPath)) {
+    return "未绑定本机工程文件夹，无法打开「渲染图」。";
+  }
+  const dir = joinDisk(currentPath, "渲染图");
+  await diskMkdir(dir);
+  const ok = await revealInExplorer(dir);
+  return ok ? `已打开 ${dir}` : "无法打开资源管理器。";
 }

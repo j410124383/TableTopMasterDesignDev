@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { uid } from "@/lib/id";
 import { createProductShot } from "@/model/shot";
+import { ensureShotCameras } from "@/model/shotCamera";
 import type { ProductShot } from "@/model/types";
 import { useAppStore } from "@/store/appStore";
 import { useEditorStore } from "@/store/editorStore";
 import { ContextMenu, type MenuItem } from "@/ui/ContextMenu";
 import { HelpTip } from "@/ui/HelpTip";
 import { applyShotLayout, SHOT_LAYOUTS, type ShotLayoutId } from "./shotLayout";
+import { ShotViewport } from "./ShotViewport";
 
 function duplicateShot(src: ProductShot): ProductShot {
   const copy = structuredClone(src) as ProductShot;
@@ -17,7 +19,7 @@ function duplicateShot(src: ProductShot): ProductShot {
 }
 
 export function ShotLibrary() {
-  const { current, patchProject } = useAppStore();
+  const { current, currentPath, patchProject } = useAppStore();
   const openShot = useEditorStore((s) => s.openShot);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
@@ -97,7 +99,9 @@ export function ShotLibrary() {
         <div className="empty">还没有产品场景。选一个布局模版，点右上角新建。</div>
       ) : (
         <div className="bp-grid">
-          {shots.map((shot) => (
+          {shots.map((shot) => {
+            const camState = ensureShotCameras(shot);
+            return (
             <article
               key={shot.id}
               className="bp-tile"
@@ -107,8 +111,21 @@ export function ShotLibrary() {
               }}
             >
               <button type="button" className="shot-lib-preview" onClick={() => openShot(shot.id)}>
-                <span>{shot.items.filter((it) => it.refId).length} 件</span>
-                <span className="muted">{shot.items.length ? `${shot.items.length} 槽` : "空场景"}</span>
+                <ShotViewport
+                  items={shot.items}
+                  selectedId={null}
+                  onSelect={() => undefined}
+                  onMove={() => undefined}
+                  onTransform={() => undefined}
+                  onOrbit={() => undefined}
+                  cameras={camState.cameras}
+                  lookThroughId={camState.lookThroughId}
+                  render={shot.render}
+                  look={shot.look}
+                  project={current}
+                  projectDir={currentPath}
+                  gizmos={false}
+                />
               </button>
               {renaming === shot.id ? (
                 <form
@@ -146,7 +163,8 @@ export function ShotLibrary() {
                 </button>
               </div>
             </article>
-          ))}
+            );
+          })}
           <button type="button" className="bp-tile bp-tile-new" onClick={create}>
             <span className="bp-plus">+</span>
             <span>新建场景</span>

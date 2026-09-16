@@ -6,12 +6,13 @@ import { useAppStore } from "@/store/appStore";
 import { useEditorStore } from "@/store/editorStore";
 import { ColorField } from "@/ui/ColorField";
 import { HelpTip } from "@/ui/HelpTip";
+import { ResolutionField } from "@/ui/ResolutionField";
 import { BoxGl } from "./boxGl";
 import { loadFittedBoxTexture } from "./boxTexture";
 import { BoxLibrary } from "./BoxLibrary";
 import { BoxUvPanel } from "./BoxUvPanel";
 import { BoxViewport } from "./BoxViewport";
-import { saveRenderPng } from "./saveRenderPng";
+import { openRenderFolder, saveRenderPng } from "./saveRenderPng";
 
 type Step = "struct" | "render";
 
@@ -120,6 +121,7 @@ function BoxEditor({ box }: { box: PackagingBox }) {
           <h1>{box.name}</h1>
           <HelpTip>
             <p>方盒 → 一张贴图 + UV → 本盒渲染。UV 在次级编辑器里调。倒角跟这只盒子绑定，产品渲染场景会直接用。</p>
+            <p>渲染页：空白左键转镜头；Alt+左键平移；红框是即将导出的画幅。</p>
           </HelpTip>
         </div>
         <div className="row">
@@ -149,7 +151,10 @@ function BoxEditor({ box }: { box: PackagingBox }) {
           selectedFace={uvOpen ? face : null}
           onSelectFace={uvOpen ? setFace : undefined}
           transparentBg={step === "render" && render.cullBackground}
-          onOrbit={(yaw, pitch, distance) => patchRender({ camera: { ...render.camera, yaw, pitch, distance } }, "box-orbit")}
+          filmGate={step === "render"}
+          onOrbit={(yaw, pitch, distance, target) =>
+            patchRender({ camera: { ...render.camera, yaw, pitch, distance, ...(target ? { target } : {}) } }, "box-orbit")
+          }
         />
         <aside className="box-side">
           {step === "struct" && (
@@ -452,22 +457,16 @@ function BoxEditor({ box }: { box: PackagingBox }) {
                 />
                 <p className="muted">0 为尖棱。调大后十二条棱变 smooth。</p>
               </div>
-              <div className="field">
-                <label>分辨率</label>
-                <select
-                  value={`${render.resolutionW}x${render.resolutionH}`}
-                  onChange={(e) => {
-                    const [rw, rh] = e.target.value.split("x").map(Number);
-                    patchRender({ resolutionW: rw, resolutionH: rh });
-                  }}
-                >
-                  <option value="1920x1080">1920 × 1080</option>
-                  <option value="1280x720">1280 × 720</option>
-                  <option value="2048x2048">2048 × 2048</option>
-                </select>
-              </div>
+              <ResolutionField
+                width={render.resolutionW}
+                height={render.resolutionH}
+                onChange={(rw, rh) => patchRender({ resolutionW: rw, resolutionH: rh })}
+              />
               <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void doRender()}>
                 {busy ? "渲染中…" : "渲染并保存到「渲染图」"}
+              </button>
+              <button type="button" className="btn" onClick={() => void openRenderFolder(currentPath).then(setInfo)}>
+                打开渲染文件夹
               </button>
             </div>
           )}

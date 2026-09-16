@@ -48,7 +48,7 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    open: true,
+    open: process.env.TMD_NO_BROWSER === "1" ? false : true,
     host: host || "0.0.0.0",
     allowedHosts: true,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,

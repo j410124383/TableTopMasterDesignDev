@@ -19,6 +19,7 @@ import {
   type Mat4,
   type Vec3,
 } from "./boxGeom";
+import { cameraTargetOf, filmGateRect, filmSize, overscanFovY } from "./filmGate";
 
 const VS = `
 attribute vec3 aPos;
@@ -59,7 +60,9 @@ void main() {
   float ndl = abs(dot(n, normalize(uLightDir)));
   vec4 texc = vUseTex > 1.5 ? texture2D(uTexBack, vUv) : texture2D(uTex, vUv);
   float has = vUseTex > 1.5 ? uHasBackTex : uHasTex;
-  vec4 albedo = mix(vec4(uTint, 1.0), texc, has * texc.a * step(0.5, vUseTex));
+  if (vUseTex > 0.5 && has > 0.5 && texc.a < 0.08) discard;
+  float useRgb = has * step(0.5, vUseTex) * step(0.01, uKey + uFill);
+  vec4 albedo = mix(vec4(uTint, 1.0), vec4(texc.rgb, 1.0), useRgb);
   vec3 base = albedo.rgb;
   vec3 lit = base * uAmbient + base * ndl * uKey * uLightColor + base * uFill;
   gl_FragColor = vec4(lit, albedo.a);
@@ -136,6 +139,15 @@ export type BoxViewOpts = {
   groundY?: number;
   gridSize?: number;
   silhouette?: boolean;
+  /** 视口按分辨率过扫，红框内与导出画幅一致 */
+  filmGate?: boolean;
+  cameras?: {
+    position: { x: number; y: number; z: number };
+    rotationDeg: { x: number; y: number; z: number };
+    fov: number;
+    projection?: "perspective" | "isometric";
+    selected?: boolean;
+  }[];
 };
 
 export type SceneDrawItem = {
@@ -301,11 +313,12 @@ export class BoxGl {
     );
     this.model = model;
     const cam = setup.camera;
-    const eye = orbitEye(cam.yaw, cam.pitch, cam.distance);
-    const view = matLookAt(eye, [0, 0, 0], [0, 1, 0]);
+    const target = cameraTargetOf(cam);
+    const eye = orbitEye(cam.yaw, cam.pitch, cam.distance, target);
+    const view = matLookAt(eye, target, [0, 1, 0]);
     const near = Math.max(1, cam.distance / 80);
     const far = cam.distance * 8;
-    const proj = makeProj(setup, aspect, near, far);
+    const proj = makeProj(setup, aspect, near, far, opts.filmGate ? { w: this.w, h: this.h } : undefined);
     const vp = matMul(proj, view);
     this.vp = vp;
     this.invVp = matInvert(vp);
@@ -402,11 +415,12 @@ export class BoxGl {
       buf.push(a[0], a[1], a[2], b[0], b[1], b[2]);
       col.push(rgb[0], rgb[1], rgb[2], rgb[0], rgb[1], rgb[2]);
     };
+    const gy = groundY - 0.08;
     for (let i = -8; i <= 8; i++) {
       const t = i * step;
-      const fade = i === 0 ? 0.62 : 0.32;
-      push(grid, gridCol, [-g, groundY, t], [g, groundY, t], [fade, fade, fade]);
-      push(grid, gridCol, [t, groundY, -g], [t, groundY, g], [fade, fade, fade]);
+      const fade = i === 0 ? 0.92 : 0.58;
+      push(grid, gridCol, [-g, gy, t], [g, gy, t], [fade, fade, fade]);
+      push(grid, gridCol, [t, gy, -g], [t, gy, g], [fade, fade, fade]);
     }
     const ax = Math.max(40, g * 0.45);
     push(overlay, overlayCol, [0, 0, 0], [ax, 0, 0], [1, 0.28, 0.22]);
@@ -420,6 +434,50 @@ export class BoxGl {
     push(overlay, overlayCol, [lp[0] - tick, lp[1], lp[2]], [lp[0] + tick, lp[1], lp[2]], [1, 0.92, 0.35]);
     push(overlay, overlayCol, [lp[0], lp[1] - tick, lp[2]], [lp[0], lp[1] + tick, lp[2]], [1, 0.92, 0.35]);
     push(overlay, overlayCol, [lp[0], lp[1], lp[2] - tick], [lp[0], lp[1], lp[2] + tick], [1, 0.92, 0.35]);
+
+    const cams = opts.cameras ?? [];
+    if (cams.length) {
+      const film = filmSize(setup);
+      const aspect = Math.max(0.2, film.w / Math.max(1, film.h));
+      for (const cam of cams) {
+        const model = matMul(
+          matTranslate(cam.position.x, cam.position.y, cam.position.z),
+          matRotateXYZ((cam.rotationDeg.x * Math.PI) / 180, (cam.rotationDeg.y * Math.PI) / 180, (cam.rotationDeg.z * Math.PI) / 180),
+        );
+        const xform = (p: Vec3): Vec3 => {
+          const v = mulVec4(model, [p[0], p[1], p[2], 1]);
+          return [v[0], v[1], v[2]];
+        };
+        const near = 6;
+        const far = 42;
+        const fov = (Math.max(8, cam.fov || 32) * Math.PI) / 180;
+        const iso = cam.projection === "isometric";
+        const nh = iso ? 10 : Math.tan(fov / 2) * near;
+        const nw = nh * aspect;
+        const fh = iso ? 28 : Math.tan(fov / 2) * far;
+        const fw = fh * aspect;
+        const ns = [
+          xform([-nw, -nh, -near]),
+          xform([nw, -nh, -near]),
+          xform([nw, nh, -near]),
+          xform([-nw, nh, -near]),
+        ];
+        const fs = [
+          xform([-fw, -fh, -far]),
+          xform([fw, -fh, -far]),
+          xform([fw, fh, -far]),
+          xform([-fw, fh, -far]),
+        ];
+        const rgb: Vec3 = cam.selected ? [1, 0.82, 0.28] : [0.45, 0.78, 0.95];
+        const origin = xform([0, 0, 0]);
+        for (let i = 0; i < 4; i++) {
+          push(overlay, overlayCol, ns[i]!, ns[(i + 1) % 4]!, rgb);
+          push(overlay, overlayCol, fs[i]!, fs[(i + 1) % 4]!, rgb);
+          push(overlay, overlayCol, ns[i]!, fs[i]!, rgb);
+          push(overlay, overlayCol, origin, ns[i]!, rgb);
+        }
+      }
+    }
 
     const drawLines = (pos: number[], col: number[]) => {
       if (!pos.length) return;
@@ -586,11 +644,12 @@ export class BoxGl {
     const gl = this.gl;
     const aspect = this.w / this.h;
     const cam = setup.camera;
-    const eye = orbitEye(cam.yaw, cam.pitch, cam.distance);
-    const view = matLookAt(eye, [0, 0, 0], [0, 1, 0]);
+    const target = cameraTargetOf(cam);
+    const eye = orbitEye(cam.yaw, cam.pitch, cam.distance, target);
+    const view = matLookAt(eye, target, [0, 1, 0]);
     const near = Math.max(1, cam.distance / 80);
     const far = cam.distance * 8;
-    const proj = makeProj(setup, aspect, near, far);
+    const proj = makeProj(setup, aspect, near, far, opts.filmGate ? { w: this.w, h: this.h } : undefined);
     const vp = matMul(proj, view);
     this.vp = vp;
     this.invVp = matInvert(vp);
@@ -632,8 +691,8 @@ export class BoxGl {
       const mvp = matMul(vp, item.model);
       gl.uniformMatrix4fv(this.loc.uMVP, false, mvp);
       gl.uniformMatrix4fv(this.loc.uModel, false, item.model);
-      gl.uniform1f(this.loc.uHasTex, opts.silhouette ? 0 : hasFront ? 1 : 0);
-      gl.uniform1f(this.loc.uHasBackTex, opts.silhouette ? 0 : hasBack ? 1 : 0);
+      gl.uniform1f(this.loc.uHasTex, hasFront ? 1 : 0);
+      gl.uniform1f(this.loc.uHasBackTex, hasBack ? 1 : 0);
       if (item.tint && !opts.silhouette) gl.uniform3f(this.loc.uTint, item.tint[0], item.tint[1], item.tint[2]);
       else if (!opts.silhouette) gl.uniform3f(this.loc.uTint, 0.78, 0.76, 0.72);
       gl.drawArrays(gl.TRIANGLES, 0, this.vCount);
@@ -653,7 +712,7 @@ export class BoxGl {
       }
     }
     if (opts.gizmos !== false && !opts.silhouette) {
-      this.drawGizmos(setup, vp, { ...opts, groundY: opts.groundY ?? 0, gridSize: opts.gridSize ?? 220 });
+      this.drawGizmos(setup, vp, { ...opts, groundY: opts.groundY ?? 0, gridSize: opts.gridSize ?? 420 });
     }
   }
 
@@ -740,8 +799,24 @@ export function loadTextureImage(src: string, projectDir?: string | null): Promi
 
 export { ensureBoxRender };
 
-function makeProj(setup: BoxRenderSetup, aspect: number, near: number, far: number) {
+function makeProj(
+  setup: BoxRenderSetup,
+  aspect: number,
+  near: number,
+  far: number,
+  overscan?: { w: number; h: number },
+) {
   const cam = setup.camera;
+  if (overscan) {
+    const film = filmSize(setup);
+    const gate = filmGateRect(overscan.w, overscan.h, film.w, film.h);
+    const k = overscan.h / Math.max(1, gate.h);
+    if (setup.projection === "isometric") {
+      const halfH = Math.max(20, cam.distance * 0.42) * k;
+      return matOrtho(halfH * aspect, halfH, near, far);
+    }
+    return matPerspective(overscanFovY(cam.fov, overscan.h, gate.h), aspect, near, far);
+  }
   if (setup.projection === "isometric") {
     const halfH = Math.max(20, cam.distance * 0.42);
     return matOrtho(halfH * aspect, halfH, near, far);

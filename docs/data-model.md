@@ -1,7 +1,7 @@
 # 数据模型
 
 > 未标注产品确认的段落 `[反推]` 自 `src/model/types.ts`、`schema.ts`、`normalize.ts`。  
-> `kind` / `thicknessMm` / `core` / `pieceSpecs` / `boxes` / `shots` / `textureFit` / `bevelMm` / `rulebooks` 为产品已确认；说明书编辑器仍占位。
+> `kind` / `thicknessMm` / `core` / `pieceSpecs` / `boards` / `boxes` / `shots` / `textureFit` / `bevelMm` / `rulebooks` / `cameras` / `lookThroughId` 为产品已确认；说明书编辑器仍占位。
 
 ## Schema 版本
 
@@ -13,8 +13,9 @@
 
 ```mermaid
 erDiagram
-  Project ||--o{ PieceSpec : "卡牌/板件规格"
-  Project ||--o{ Blueprint : "卡牌/板件"
+  Project ||--o{ PieceSpec : "卡牌规格"
+  Project ||--o{ Blueprint : "卡牌"
+  Project ||--o{ BoardPiece : "板件"
   Project ||--o{ CardSet : contains
   Project ||--o{ PackagingBox : "包装盒"
   Project ||--o{ ProductShot : "产品图"
@@ -33,7 +34,8 @@ erDiagram
 
 | 维度 | 数据 | 说明 |
 |------|------|------|
-| 卡牌 / 板件 | `pieceSpecs` + `blueprints` + `sets` | 规格是纸张物理参数块；蓝图挂规格并选竖/横。卡牌纸厚与卡芯、板件板厚写在规格上（产品渲染用，不改变 2D 排版逻辑） |
+| 卡牌 | `pieceSpecs` + `blueprints` + `sets` | 规格是纸张物理参数块；蓝图挂规格并选竖/横。纸厚与卡芯写在规格上（产品渲染用，不改变 2D 排版） |
+| 板件 | `boards` | 一张贴图按 alpha 扣形 + 板厚 + 最长边 mm。不走蓝图图层。见 [boards.md](./features/boards.md) |
 | 包装盒 | `boxes` | 方盒参数、整盒一张贴图（铺法 original/cover/tile）、棱倒角、每面 UV 壳、单盒渲染 |
 | 产品渲染 | `shots` | 场景库 + 场景编辑；透视/等距；卡/板/盒同框出产品图 |
 | 说明书 | `rulebooks` | 占位；字段待说明书规格补全 |
@@ -56,8 +58,9 @@ erDiagram
 type Project = {
   schemaVersion: number;
   meta: ProjectMeta;
-  pieceSpecs?: PieceSpec[];  // 卡牌/板件物理规格；缺省打开时由蓝图迁移补齐
+  pieceSpecs?: PieceSpec[];  // 卡牌物理规格；缺省打开时由蓝图迁移补齐
   blueprints: Blueprint[];
+  boards?: BoardPiece[];     // 贴图扣形板件，缺省视为 []
   sets: CardSet[];
   boxes?: PackagingBox[];     // 包装盒，缺省视为 []
   shots?: ProductShot[];      // 产品渲染场景，缺省视为 []
@@ -86,7 +89,7 @@ type Project = {
 
 ## PieceSpec
 
-项目里的 **卡牌/板件规格**（预览块）。多张蓝图共用一条。交互见 [pieces.md](./features/pieces.md)。
+项目里的 **卡牌规格**（预览块）。多张卡牌蓝图共用一条。交互见 [pieces.md](./features/pieces.md)。板件不走规格，见 `BoardPiece`。
 
 ```typescript
 type PieceSpec = {
@@ -99,16 +102,35 @@ type PieceSpec = {
   core?: "white" | "black"; // 仅卡牌
   bleedMm: number;
   cornerRadiusMm: number;
+  /** 从哪条内置模版复制来的，仅备注。有值仍可编辑 */
+  sourceTemplateId?: string;
 };
 ```
 
-`Project.pieceSpecs` 缺省 `[]`，打开旧工程时按蓝图指纹迁移，至少一条。
+内置模版规格（扑克牌、塔罗、三国杀、万智牌等）**不写入** `pieceSpecs`，见 [pieces.md](./features/pieces.md)。蓝图 `specId` 只能指向项目里的自定义规格。
 
-`Project.meta.defaultSpecId?: string` 默认规格；缺则用引用最多的一条。
+`Project.meta.defaultSpecId?: string` 默认卡牌规格；缺则用引用最多的一条。
+
+## BoardPiece
+
+贴图扣形板件。与卡牌蓝图独立。交互见 [boards.md](./features/boards.md)。
+
+```typescript
+type BoardPiece = {
+  id: string;
+  name: string;
+  textureAssetId: string;   // project.assets；推荐透明 PNG
+  thicknessMm: number;      // 默认 2
+  /** 平面包络最长边 mm。另一边按贴图像素比。缺省 40 */
+  longestMm?: number;
+};
+```
+
+`Project.boards?: BoardPiece[]`。缺省 `[]`。产品渲染 `kind: "board"` 的 `refId` 指向这里。旧 `Blueprint.kind === "board"` 仅兼容列出，新建不写蓝图。
 
 ## Blueprint
 
-一张**卡牌或板件**的正反面定义。图层上的 `text` / `style` / `visible` 等是蓝图自有数据，**永远不被数据集覆盖**。`vars` 只是列名声明：数据集渲染时用 `card.fields` 覆盖对应属性；蓝图页始终用图层自身的值。
+一张**卡牌**的正反面定义。图层上的 `text` / `style` / `visible` 等是蓝图自有数据，**永远不被数据集覆盖**。`vars` 只是列名声明：数据集渲染时用 `card.fields` 覆盖对应属性；蓝图页始终用图层自身的值。
 
 物理参数以挂接的 `PieceSpec` 为准，蓝图上的 `size` / `bleedMm` / `cornerRadiusMm` / `thicknessMm` / `core` 是 **同步副本**（给渲染/打印直接读，避免到处解析规格）。改规格或朝向时必须写回这些副本。禁止在蓝图上单独改副本而不改规格。
 
@@ -116,12 +138,12 @@ type PieceSpec = {
 |------|------|------|
 | id | string | 蓝图 ID |
 | name | string | 名称 |
-| kind | `"card"` \| `"board"` | 必须与所挂规格 `kind` 一致。缺省按 `card` |
+| kind | `"card"` \| `"board"` | 新数据为 `card`。`board` 仅旧工程兼容，见 BoardPiece |
 | specId | string | 所挂 `PieceSpec.id` |
 | orientation | `"portrait"` \| `"landscape"` | 竖放 / 横放。横放把规格竖放基准的宽高对调 |
 | size | SizeMm | 成品宽高（mm），由规格 + 朝向算出 |
 | thicknessMm | number? | 自规格同步 |
-| core | `"white"` \| `"black"`? | 自规格同步；板件忽略 |
+| core | `"white"` \| `"black"`? | 自规格同步 |
 | bleedMm | number | 自规格同步 |
 | cornerRadiusMm | number | 自规格同步。**产品渲染网格必须使用** |
 | frontLayers | Layer[] | 正面图层树 |
@@ -129,7 +151,7 @@ type PieceSpec = {
 
 - 竖放：`size = spec.size`；横放：`size = { w: spec.size.h, h: spec.size.w }`
 - 旧项目无 `pieceSpecs` / `specId` 时，打开即迁移（见 pieces.md「打开旧工程」），**不改图层与现有宽高数值**
-- 改 kind：改挂同 kind 规格，并同步副本
+- 改 kind：界面不再把卡牌改成板件；旧 `board` 蓝图保留兼容
 
 ## Layer
 
@@ -236,7 +258,14 @@ type UvIsland = {
 type BoxRenderSetup = {
   position: { x: number; y: number; z: number };
   rotationDeg: { x: number; y: number; z: number };
-  camera: { yaw: number; pitch: number; distance: number; fov: number };
+  camera: {
+    yaw: number;
+    pitch: number;
+    distance: number;
+    fov: number;
+    /** 轨道看向点（世界 mm）。缺省 {0,0,0}。渲染模式中键或 Alt+左键平移改这个 */
+    target?: { x: number; y: number; z: number };
+  };
   /** 产品渲染用。透视=透视投影+FOV；等距=正交投影，忽略 fov。包装盒单盒渲染可暂不读。缺省 perspective */
   projection?: "perspective" | "isometric";
   lights: {
@@ -269,6 +298,8 @@ type PackagingBox = {
 
 约束：没有 per-face `assetId`。换图只改 `textureAssetId`，六面 UV 壳保留。屏幕上的壳宽高 = `w * (scaleX ?? 1)`、`h * (scaleY ?? 1)`。`textureFit` 决定贴图如何铺进 UV 0–1，再被各面壳采样。
 
+`resolutionW` / `resolutionH` 缺省 1920×1080，可预选或自定义（**大于 0**，上限约 32768）。键入过程中不要夹到 256。`camera.target` 缺省原点；产品渲染与包装盒 3D 渲染视口用 **中键拖** 或 Alt+左键平移看向点。旧数据无 `target` 视为 `{0,0,0}`。
+
 ## ProductShot
 
 产品渲染场景。一个项目可有多个；物件是实例，不拥有蓝图/盒子。
@@ -277,15 +308,44 @@ type PackagingBox = {
 type ProductShotItem = {
   id: string;
   kind: "card" | "board" | "box" | "stack";
-  /** card/board → blueprintId；box → boxId；stack → setId。布局槽位未填时为空字符串 */
+  /** card → blueprintId；board → BoardPiece.id；box → boxId；stack → setId。布局槽位未填时为空字符串 */
   refId: string;
   setId?: string;     // kind=card 时所属卡牌集
   cardId?: string;    // kind=card 时哪一张
+  /** 卡牌、卡牌集共用。front 正面朝上（缺省）；back 背面朝上。背面朝上 = 局部先 Rx180 再 Ry180，顶面仍贴正面、底面仍贴背面 */
   face?: "front" | "back";
   position: { x: number; y: number; z: number };
   rotationDeg: { x: number; y: number; z: number };
   scale?: number;     // 默认 1
   slotId?: string;    // 布局模版槽位；未填时视口画占位体
+  /** 仅 kind=stack。缺省 = 满集 + 牌组形态 */
+  stack?: ShotStackLook;
+};
+
+type ShotStackShape = "deck" | "messy" | "row" | "fan";
+type ShotFanDir = "up" | "down";
+
+type ShotStackLook = {
+  shape?: ShotStackShape;  // 缺省 deck
+  /** 展开 qty 后的张序，1-based 闭区间。缺省满集 */
+  countFrom?: number;
+  countTo?: number;
+  /** 一字、扇形共用：一字为中心距额外量；扇形加在上弧。缺省 4 */
+  gapMm?: number;
+  /** 一字、扇形共用。ltr 从左到右（缺省）；rtl 从右到左。叠放仍从上到下 */
+  spread?: "ltr" | "rtl";
+  /** 扇形下缘弦宽 mm。缺省约短边×0.6 */
+  fanInnerMm?: number;
+  /** 扇形上缘弧长 mm。缺省约长边×2.8 */
+  fanOuterMm?: number;
+  /** @deprecated 仅旧数据；有 fanInner/Outer 时忽略 */
+  fanDeg?: number;
+  /** @deprecated 旧扇形站姿；朝上改读 item.face。未写 face 时 down = 背面朝上 */
+  fanDir?: ShotFanDir;
+  /** 扇叶：bottomUp 从下到上（缺省）；topDown 从上到下 */
+  fanLeaf?: "bottomUp" | "topDown";
+  /** 错落强度 0–1。缺省 0.4 */
+  messy?: number;
 };
 
 type ProductShotLook = {
@@ -298,21 +358,48 @@ type ProductShotLook = {
   blur?: number;
 };
 
+/** Maya 式场景摄像机。视线沿局部 −Z。产品渲染场景物体，不是灯光。 */
+type ShotCamera = {
+  id: string;
+  name: string;           // 默认 persp、Camera1…
+  position: { x: number; y: number; z: number };
+  rotationDeg: { x: number; y: number; z: number };
+  fov: number;            // 透视；等距时忽略
+  projection?: "perspective" | "isometric";
+};
+
 type ProductShot = {
   id: string;
   name: string;
   items: ProductShotItem[];
-  render: BoxRenderSetup;   // 摄像机/灯光/背景/分辨率/透视或等距，与包装盒渲染同形
+  cameras?: ShotCamera[];   // 至少一台；缺省打开时从 render.camera 生成 persp
+  lookThroughId?: string;   // 当前视口与静帧渲染看穿的摄像机。缺省第一台
+  render: BoxRenderSetup;   // 灯光/背景/分辨率；camera 轨道与当前看穿机同步
   look?: ProductShotLook;
   layoutId?: string;        // 最近应用的内置布局 id（empty / box-fan / box-row / box-stack-fan）
+  /** 后期：转台序列。缺省视为未配置，静帧导出不读这些字段 */
+  sequence?: ShotSequence;
+};
+
+/** 后期（Maya Render Sequence）。第一刀只有转台。见 product-render.md */
+type ShotSequence = {
+  mode?: "turntable";     // 缺省 turntable
+  frames?: number;        // 缺省 120
+  fps?: number;           // 缺省 24，只供对齐剪辑，不编码视频
+  yawFrom?: number;       // 缺省当前 camera.yaw
+  yawTo?: number;         // 缺省 yawFrom + 360
 };
 ```
 
 `Project.shots?: ProductShot[]`。缺省 `[]`。进入产品渲染页 **不要**自动建场景；库为空就显示空态。
 
-卡牌 / 卡牌集放入场景时默认 `rotationDeg` 使卡面平行地面、正面朝上。`face` 缺省 `front`：顶面正面、底面背面（`backLayers`）。卡牌集顶面代表卡正面、底面蓝图背面。卡牌集显示厚度 = `Σ cards[].qty` × 蓝图纸厚（合计 0 则按 1 张）。
+卡牌 / 卡牌集放入场景时默认卡面平行地面、正面朝上。新放入 `rotationDeg = {0,0,0}`（头尾已编进网格）。`face` 缺省 `front`：网格顶面始终正面、底面始终背面。`face: "back"` 背面朝上时不换贴图，只在局部先绕 X 180° 再绕 Y 180°。旧扇形若只写了 `stack.fanDir === "down"` 且未写 `face`，视为背面朝上。
+
+卡牌集显示内容由 `stack` 决定：缺省形态 `deck`、张数满集（`Σ cards[].qty`，合计 0 则 1 张）。`countFrom`/`countTo` 按展开后的牌序取闭区间。牌组厚度 = 区间张数 × 蓝图纸厚。错落 / 一字 / 扇形逐张薄片，单件最多 48 张。顶面用区间内最上面那张的正面，底面蓝图背面。`stack` 只存在于场景实例，不写回卡牌集。
 
 包装盒实例只读取该盒已有的 `bevelMm`，产品场景数据里 **没有** 倒角字段。
+
+`cameras` / `lookThroughId`：旧场景没有时，`normalize` 用 `render.camera` 生成一台 `persp` 并看穿它。删摄像机不能删光。看穿机的轨道与 `render.camera` 保持同步，便于后期转台仍读 yaw。
 
 ## Rulebook
 
@@ -390,7 +477,7 @@ type ExportPreset = {
 
 ## 文件夹格式 (ceditor-folder-v1)
 
-磁盘上的 `project.json` 不含内联 data URL 大资产；资产存 `assets/` 子目录，JSON 内为相对路径。卡牌规格存 `data/piece-specs/{id}.json`。
+磁盘上的 `project.json` 不含内联 data URL 大资产；资产存 `assets/` 子目录，JSON 内为相对路径。卡牌规格存 `data/piece-specs/{id}.json`。板件存 **`data/boards/{id}.json`**（与 `boxes/`、`shots/` 同级）。漏写 boards 会导致重开后场景里的板件变成「丢失」。
 
 **覆盖素材**：同一 `assetId` 可被新文件覆盖。覆盖后所有引用该 id 的预览必须立刻换图，不得继续显示旧缓存。
 
@@ -413,3 +500,4 @@ empty, poker, sanguosha, mtg, pokemon, mahjong, uno, halligalli
 3. 旧 projects 自动 migrate templates/decks → blueprints/sets
 4. 打开时若无 `pieceSpecs` 或蓝图缺 `specId`，按物理指纹合并补规格（不改图层与现有 size 数值）
 5. 三国杀 identity 背面等特殊 patch 在 validate 后应用
+6. 产品渲染卡牌集缺 `stack` 视为满集 + 牌组；打开时不改写已存 `rotationDeg`

@@ -3,7 +3,8 @@ import { fieldKeysFromLayers, fieldTypesFromLayers } from "./layerVars";
 import { ensureCardSetViews } from "./cardSetView";
 import { applySpecToBlueprint, ensurePieceSpecs } from "./pieceSpec";
 import { CARD_STOCK_MM } from "./piece";
-import type { Blueprint, CardSet, Deck, PieceOrientation, PieceSpec, Project, Template } from "./types";
+import { ensureShotCameras } from "./shotCamera";
+import type { Blueprint, BoardPiece, CardSet, Deck, PieceOrientation, PieceSpec, Project, Template } from "./types";
 import { ensureBoxFaces } from "./box";
 
 export function templateFromBlueprint(bp: Blueprint, face: "front" | "back"): Template {
@@ -98,7 +99,8 @@ export function syncDerived(project: Project): Project {
     blueprints,
     sets,
     boxes: (project.boxes ?? []).map(ensureBoxFaces),
-    shots: project.shots ?? [],
+    boards: project.boards ?? [],
+    shots: (project.shots ?? []).map(ensureShotCameras),
     rulebooks: project.rulebooks ?? [],
     pieceSpecs: project.pieceSpecs ?? [],
     templates: templatesFromBlueprints(blueprints),
@@ -116,16 +118,47 @@ export function normalizeProject(project: Project): Project {
     sets = setsFromDecks(project.decks, blueprints);
   }
   return syncDerived(
-    ensurePieceSpecs({
-      ...project,
-      blueprints,
-      sets,
-      boxes: project.boxes ?? [],
-      shots: project.shots ?? [],
-      rulebooks: project.rulebooks ?? [],
-      pieceSpecs: project.pieceSpecs ?? [],
-    }),
+    migrateShotStackIdentityYaw(
+      ensurePieceSpecs({
+        ...project,
+        blueprints,
+        sets,
+        boxes: project.boxes ?? [],
+        boards: (project.boards ?? []).map(normalizeBoardPiece),
+        shots: (project.shots ?? []).map(ensureShotCameras),
+        rulebooks: project.rulebooks ?? [],
+        pieceSpecs: project.pieceSpecs ?? [],
+      }),
+    ),
   );
+}
+
+function normalizeBoardPiece(b: BoardPiece): BoardPiece {
+  const t = Number(b.thicknessMm);
+  const longest = Number(b.longestMm);
+  return {
+    ...b,
+    textureAssetId: b.textureAssetId ?? "",
+    thicknessMm: Number.isFinite(t) && t >= 0 ? t : 2,
+    longestMm: Number.isFinite(longest) && longest > 0 ? longest : 40,
+  };
+}
+
+function migrateShotStackIdentityYaw(project: Project): Project {
+  let changed = false;
+  const shots = (project.shots ?? []).map((shot) => ({
+    ...shot,
+    items: shot.items.map((it) => {
+      if (it.kind !== "stack") return it;
+      const r = it.rotationDeg;
+      if (r.x === 0 && r.y === 180 && r.z === 0) {
+        changed = true;
+        return { ...it, rotationDeg: { x: 0, y: 0, z: 0 } };
+      }
+      return it;
+    }),
+  }));
+  return changed ? { ...project, shots } : project;
 }
 
 function normalizeBlueprint(bp: Blueprint): Blueprint {

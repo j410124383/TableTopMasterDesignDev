@@ -1,11 +1,12 @@
 import type { BoxGl } from "@/features/box/boxGl";
-import type { Vec3 } from "@/features/box/boxGeom";
+import { matRotateXYZ, mulVec4, type Vec3 } from "@/features/box/boxGeom";
 import type { ProductShotItem } from "@/model/types";
 
 export type GizmoMode = "move" | "rotate" | "scale";
 export type GizmoAxis = "x" | "y" | "z" | "uniform";
+export type GizmoSpace = "world" | "local";
 
-const AXIS: { id: GizmoAxis; dir: Vec3; color: string }[] = [
+const AXIS: { id: Exclude<GizmoAxis, "uniform">; dir: Vec3; color: string }[] = [
   { id: "x", dir: [1, 0, 0], color: "#e44545" },
   { id: "y", dir: [0, 1, 0], color: "#3dcc6a" },
   { id: "z", dir: [0, 0, 1], color: "#4d8dff" },
@@ -27,7 +28,24 @@ function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, b
   return Math.hypot(px - (ax + vx * t), py - (ay + vy * t));
 }
 
-export function pickGizmo(gl: BoxGl, item: ProductShotItem, mode: GizmoMode, x: number, y: number): GizmoAxis | null {
+export function axisDir(axis: GizmoAxis, item?: ProductShotItem, space: GizmoSpace = "world"): Vec3 {
+  const base: Vec3 = axis === "y" ? [0, 1, 0] : axis === "z" ? [0, 0, 1] : [1, 0, 0];
+  if (axis === "uniform" || space === "world" || !item) return base;
+  const r = item.rotationDeg;
+  const m = matRotateXYZ((r.x * Math.PI) / 180, (r.y * Math.PI) / 180, (r.z * Math.PI) / 180);
+  const v = mulVec4(m, [base[0], base[1], base[2], 0]);
+  const len = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / len, v[1] / len, v[2] / len];
+}
+
+export function pickGizmo(
+  gl: BoxGl,
+  item: ProductShotItem,
+  mode: GizmoMode,
+  x: number,
+  y: number,
+  space: GizmoSpace = "world",
+): GizmoAxis | null {
   const o = gl.projectWorld(originOf(item));
   if (!o) return null;
   const len = axisLen(item);
@@ -38,7 +56,7 @@ export function pickGizmo(gl: BoxGl, item: ProductShotItem, mode: GizmoMode, x: 
     let best: GizmoAxis | null = null;
     let bestD = 18;
     for (const ax of AXIS) {
-      const pts = rotateRing(gl, originOf(item), ax.dir, len);
+      const pts = rotateRing(gl, originOf(item), axisDir(ax.id, item, space), len);
       for (let i = 0; i < pts.length; i++) {
         const a = pts[i]!;
         const b = pts[(i + 1) % pts.length]!;
@@ -54,7 +72,8 @@ export function pickGizmo(gl: BoxGl, item: ProductShotItem, mode: GizmoMode, x: 
   let hit: GizmoAxis | null = null;
   let best = 10;
   for (const ax of AXIS) {
-    const p = gl.projectWorld([item.position.x + ax.dir[0] * len, item.position.y + ax.dir[1] * len, item.position.z + ax.dir[2] * len]);
+    const dir = axisDir(ax.id, item, space);
+    const p = gl.projectWorld([item.position.x + dir[0] * len, item.position.y + dir[1] * len, item.position.z + dir[2] * len]);
     if (!p) continue;
     const d = distToSeg(x, y, o.x, o.y, p.x, p.y);
     if (d < best) {
@@ -94,7 +113,13 @@ function rotateRing(gl: BoxGl, o: Vec3, axis: Vec3, radius: number) {
   return pts;
 }
 
-export function drawGizmo(ctx: CanvasRenderingContext2D, gl: BoxGl, item: ProductShotItem, mode: GizmoMode) {
+export function drawGizmo(
+  ctx: CanvasRenderingContext2D,
+  gl: BoxGl,
+  item: ProductShotItem,
+  mode: GizmoMode,
+  space: GizmoSpace = "world",
+) {
   const o = gl.projectWorld(originOf(item));
   if (!o) return;
   const len = axisLen(item);
@@ -104,7 +129,7 @@ export function drawGizmo(ctx: CanvasRenderingContext2D, gl: BoxGl, item: Produc
   if (mode === "rotate") {
     ctx.lineWidth = 4;
     for (const ax of AXIS) {
-      const pts = rotateRing(gl, originOf(item), ax.dir, len);
+      const pts = rotateRing(gl, originOf(item), axisDir(ax.id, item, space), len);
       if (pts.length < 2) continue;
       ctx.strokeStyle = ax.color;
       ctx.beginPath();
@@ -118,7 +143,8 @@ export function drawGizmo(ctx: CanvasRenderingContext2D, gl: BoxGl, item: Produc
   }
   ctx.lineWidth = 3;
   for (const ax of AXIS) {
-    const p = gl.projectWorld([item.position.x + ax.dir[0] * len, item.position.y + ax.dir[1] * len, item.position.z + ax.dir[2] * len]);
+    const dir = axisDir(ax.id, item, space);
+    const p = gl.projectWorld([item.position.x + dir[0] * len, item.position.y + dir[1] * len, item.position.z + dir[2] * len]);
     if (!p) continue;
     ctx.strokeStyle = ax.color;
     ctx.fillStyle = ax.color;
@@ -140,10 +166,4 @@ export function drawGizmo(ctx: CanvasRenderingContext2D, gl: BoxGl, item: Produc
     ctx.stroke();
   }
   ctx.restore();
-}
-
-export function axisDir(axis: GizmoAxis): Vec3 {
-  if (axis === "y") return [0, 1, 0];
-  if (axis === "z") return [0, 0, 1];
-  return [1, 0, 0];
 }

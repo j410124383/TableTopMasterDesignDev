@@ -44,6 +44,8 @@ type EditorState = {
   specId: string | null;
   boxId: string | null;
   boxLibraryOpen: boolean;
+  boardId: string | null;
+  boardLibraryOpen: boolean;
   shotId: string | null;
   shotLibraryOpen: boolean;
   setSelected: (id: string | null) => void;
@@ -61,6 +63,9 @@ type EditorState = {
   setBoxId: (id: string | null) => void;
   setBoxLibraryOpen: (open: boolean) => void;
   openBox: (id: string) => void;
+  setBoardId: (id: string | null) => void;
+  setBoardLibraryOpen: (open: boolean) => void;
+  openBoard: (id: string) => void;
   setShotId: (id: string | null) => void;
   setShotLibraryOpen: (open: boolean) => void;
   openShot: (id: string) => void;
@@ -82,6 +87,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   specId: null,
   boxId: null,
   boxLibraryOpen: true,
+  boardId: null,
+  boardLibraryOpen: true,
   shotId: null,
   shotLibraryOpen: true,
   previewDpi: readPreviewDpi(),
@@ -104,6 +111,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setBoxId: (boxId) => set({ boxId }),
   setBoxLibraryOpen: (boxLibraryOpen) => set({ boxLibraryOpen }),
   openBox: (id) => set({ boxId: id, boxLibraryOpen: false }),
+  setBoardId: (boardId) => set({ boardId }),
+  setBoardLibraryOpen: (boardLibraryOpen) => set({ boardLibraryOpen }),
+  openBoard: (id) => set({ boardId: id, boardLibraryOpen: false }),
   setShotId: (shotId) => set({ shotId }),
   setShotLibraryOpen: (shotLibraryOpen) => set({ shotLibraryOpen }),
   openShot: (id) => set({ shotId: id, shotLibraryOpen: false }),
@@ -141,6 +151,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       specId: null,
       boxId: null,
       boxLibraryOpen: true,
+      boardId: null,
+      boardLibraryOpen: true,
       shotId: null,
       shotLibraryOpen: true,
       canvasBox: null,

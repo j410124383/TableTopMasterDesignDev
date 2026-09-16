@@ -457,6 +457,13 @@ export const IconEllipsis = (p: IconProps) => (
     <path d="M5 12h.01M12 12h.01M19 12h.01" />
   </Svg>
 );
+export const IconBoard = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 9h10v10H6z" />
+    <path d="M6 9 9 6h10v10l-3 3" />
+    <path d="M16 9v10" />
+  </Svg>
+);
 export const IconBox = (p: IconProps) => (
   <Svg {...p}>
     <path d="M3 8 12 3l9 5v8l-9 5-9-5z" />
@@ -469,5 +476,36 @@ export const IconBook = (p: IconProps) => (
     <path d="M4 5h9a3 3 0 0 1 3 3v12H7a3 3 0 0 0-3 3z" />
     <path d="M4 5v15" />
     <path d="M16 8h4v12h-7" />
+  </Svg>
+);
+export const IconCamera = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 9h3l1.5-2h7L17 9h3v10H4z" />
+    <circle cx="12" cy="14" r="3" />
+  </Svg>
+);
+export const IconLight = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5 1.5" />
+  </Svg>
+);
+export const IconFilter = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="5" />
+    <circle cx="16" cy="12" r="5" />
+    <circle cx="10" cy="16" r="4.5" />
+  </Svg>
+);
+export const IconLayout = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16M3 10h6" />
+  </Svg>
+);
+export const IconObject = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3 21 8v8L12 21 3 16V8z" />
+    <path d="M12 12 21 8M12 12v9M12 12 3 8" />
   </Svg>
 );

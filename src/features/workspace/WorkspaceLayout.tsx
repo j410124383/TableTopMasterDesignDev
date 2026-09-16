@@ -10,6 +10,7 @@ import { useEditorStore } from "@/store/editorStore";
 import { IconBtn } from "@/ui/IconBtn";
 import {
   IconBox,
+  IconBoard,
   IconBook,
   IconCards,
   IconDice,
@@ -248,6 +249,7 @@ export function WorkspaceLayout() {
   const pieces = ["/project/specs", "/project/template", "/project/sets", "/project/deck"].some((p) => location.pathname.startsWith(p));
   const showPieceSub = pieces || location.pathname.startsWith("/project/vars");
   const packing = location.pathname.startsWith("/project/box");
+  const boarding = location.pathname.startsWith("/project/board");
   const shooting = location.pathname.startsWith("/project/shot");
   const manual = location.pathname.startsWith("/project/manual");
 
@@ -285,6 +287,10 @@ export function WorkspaceLayout() {
           <NavLink to="/project/template" className={() => `tab ${pieces ? "active" : ""}`} title={t("ws.pieces")}>
             <span className="tab-ico"><IconLayers size={15} /></span>
             <span className="tab-lbl">{t("ws.pieces")}</span>
+          </NavLink>
+          <NavLink to="/project/board" className={() => `tab ${boarding ? "active" : ""}`} title={t("ws.boards")}>
+            <span className="tab-ico"><IconBoard size={15} /></span>
+            <span className="tab-lbl">{t("ws.boards")}</span>
           </NavLink>
           <NavLink to="/project/box" className={() => `tab ${packing ? "active" : ""}`} title={t("ws.box")}>
             <span className="tab-ico"><IconBox size={15} /></span>

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { APP_ZIP, zipDownloadReady } from "@/lib/appZip";
+import { APP_ZIP, APP_ZIP_MAC, zipDownloadReady } from "@/lib/appZip";
 import { APP_VERSION, versionStamp } from "@/lib/appVersion";
 import { coverSrcOf } from "@/lib/cover";
 import { formatTime } from "@/lib/id";
@@ -50,6 +50,7 @@ export function HomePage() {
     open,
     openFile,
     openFolder,
+    openDropped,
     updateMeta,
     forget,
     relinkById,
@@ -58,6 +59,7 @@ export function HomePage() {
   const completeGuide = useOnboardingStore((s) => s.complete);
   const t = useT();
   const [appZip, setAppZip] = useState(false);
+  const [appZipMac, setAppZipMac] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createFolder, setCreateFolder] = useState<PickedFolder | null>(null);
   const [cloning, setCloning] = useState<{ name: string; project: Project; sourcePath?: string } | null>(null);
@@ -75,10 +77,12 @@ export function HomePage() {
   const setShelf = useHomeViewStore((s) => s.setShelf);
   const [marketPick, setMarketPick] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState("");
+  const [dropping, setDropping] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void zipDownloadReady().then(setAppZip);
+    void zipDownloadReady(APP_ZIP).then(setAppZip);
+    void zipDownloadReady(APP_ZIP_MAC).then(setAppZipMac);
   }, []);
 
   const filtered = useMemo(() => {
@@ -253,8 +257,34 @@ export function HomePage() {
     setError(t("card.folderFail", { path }));
   }
 
+  async function onDropProject(e: DragEvent) {
+    if (mode !== "create") return;
+    e.preventDefault();
+    setDropping(false);
+    try {
+      await openDropped(e.dataTransfer);
+      navigate("/project/template");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("err.open"));
+    }
+  }
+
   return (
-    <div className="home-root">
+    <div
+      className={`home-root ${dropping && mode === "create" ? "is-drop-target" : ""}`}
+      onDragOver={(e) => {
+        if (mode !== "create") return;
+        if (![...e.dataTransfer.types].some((t) => t === "Files")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setDropping(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+        setDropping(false);
+      }}
+      onDrop={(e) => void onDropProject(e)}
+    >
       <header className="topbar">
         <Brand />
         <div className="home-mode">
@@ -748,13 +778,22 @@ export function HomePage() {
       )}
       <details className="share-mini">
         <summary>{t("share.title")}</summary>
-        {appZip ? (
-          <a href={APP_ZIP} download>
-            {t("share.app", { v: `v${APP_VERSION}` })}
-          </a>
-        ) : (
-          <span className="muted">{t("share.appMissing")}</span>
-        )}
+        <span className="share-dls">
+          {appZip ? (
+            <a href={APP_ZIP} download>
+              {t("share.appWin", { v: `v${APP_VERSION}` })}
+            </a>
+          ) : (
+            <span className="muted">{t("share.appMissingWin")}</span>
+          )}
+          {appZipMac ? (
+            <a href={APP_ZIP_MAC} download>
+              {t("share.appMac", { v: `v${APP_VERSION}` })}
+            </a>
+          ) : (
+            <span className="muted">{t("share.appMissingMac")}</span>
+          )}
+        </span>
         <span className="muted"> · {t("share.how")}</span>
       </details>
       <SiteTags />
@@ -769,6 +808,11 @@ export function HomePage() {
           }}
         />
       )}
+      {dropping && mode === "create" ? (
+        <div className="home-drop-overlay" aria-hidden>
+          松开以打开项目文件夹
+        </div>
+      ) : null}
     </div>
   );
 }

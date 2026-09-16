@@ -443,9 +443,10 @@ export function roundedSlabMesh(wMm: number, dMm: number, tMm: number, cornerMm:
   for (let i = 0; i < n; i++) {
     const a = ring[i]!;
     const b = ring[(i + 1) % n]!;
-    const ua: [number, number] = [a.x / w + 0.5, a.z / d + 0.5];
-    const ub: [number, number] = [b.x / w + 0.5, b.z / d + 0.5];
-    // 环在 XZ 上从 +Y 看为逆时针；顶面要从上往下看为 CCW，故 topC → b → a
+    // 卡头朝 −Z（V 向卡头）、卡左朝 −X；UNPACK_FLIP_Y 后 V=1 为蓝图顶边
+    const ua: [number, number] = [a.x / w + 0.5, 0.5 - a.z / d];
+    const ub: [number, number] = [b.x / w + 0.5, 0.5 - b.z / d];
+    // 环在 XZ 上从 +Y 看是 CW；顶面要用 center→b→a 才是从上往下 CCW，否则正面被 cull、露出背面
     pushTri(pos, uv, nrm, faces, use, topC, [0.5, 0.5], [0, 1, 0], [b.x, hy, b.z], ub, [0, 1, 0], [a.x, hy, a.z], ua, [0, 1, 0], "top", 1);
     pushTri(
       pos, uv, nrm, faces, use,
@@ -472,6 +473,67 @@ export function roundedSlabMesh(wMm: number, dMm: number, tMm: number, cornerMm:
     size: { L: w, W: d, H: t },
     useTex: new Float32Array(use),
   };
+}
+
+/** 任意 XZ 轮廓挤出：宽 X、长 Z、厚 Y。顶/底贴图，侧壁 useTex=0。 */
+export function contourSlabMesh(ring: { x: number; z: number }[], wMm: number, dMm: number, tMm: number): BoxMesh {
+  const w = Math.max(1, wMm);
+  const d = Math.max(1, dMm);
+  const t = Math.max(0.12, tMm);
+  if (ring.length < 3) return roundedSlabMesh(w, d, t, 0);
+  const hy = t / 2;
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const nrm: number[] = [];
+  const faces: BoxFace[] = [];
+  const use: number[] = [];
+  const n = ring.length;
+  const topC: Vec3 = [0, hy, 0];
+  const botC: Vec3 = [0, -hy, 0];
+  for (let i = 0; i < n; i++) {
+    const a = ring[i]!;
+    const b = ring[(i + 1) % n]!;
+    const ua: [number, number] = [a.x / w + 0.5, 0.5 - a.z / d];
+    const ub: [number, number] = [b.x / w + 0.5, 0.5 - b.z / d];
+    pushTri(pos, uv, nrm, faces, use, topC, [0.5, 0.5], [0, 1, 0], [b.x, hy, b.z], ub, [0, 1, 0], [a.x, hy, a.z], ua, [0, 1, 0], "top", 1);
+    pushTri(
+      pos, uv, nrm, faces, use,
+      botC, [0.5, 0.5], [0, -1, 0],
+      [a.x, -hy, a.z], [1 - ua[0], ua[1]], [0, -1, 0],
+      [b.x, -hy, b.z], [1 - ub[0], ub[1]], [0, -1, 0],
+      "bottom",
+      2,
+    );
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const nx = dz / len;
+    const nz = -dx / len;
+    const nrmS: Vec3 = [nx, 0, nz];
+    pushTri(pos, uv, nrm, faces, use, [a.x, hy, a.z], ua, nrmS, [b.x, hy, b.z], ub, nrmS, [b.x, -hy, b.z], ub, nrmS, "front", 0);
+    pushTri(pos, uv, nrm, faces, use, [a.x, hy, a.z], ua, nrmS, [b.x, -hy, b.z], ub, nrmS, [a.x, -hy, a.z], ua, nrmS, "front", 0);
+  }
+  return {
+    pos: new Float32Array(pos),
+    uv: new Float32Array(uv),
+    nrm: new Float32Array(nrm),
+    faces,
+    size: { L: w, W: d, H: t },
+    useTex: new Float32Array(use),
+  };
+}
+
+export function cameraBodyMesh(): BoxMesh {
+  const tiny: UvIsland = { u: 0.5, v: 0.5, w: 0.02, h: 0.02, scaleX: 1, scaleY: 1 };
+  return boxMesh({
+    id: "cam-body",
+    name: "cam",
+    lengthMm: 12,
+    widthMm: 18,
+    heightMm: 10,
+    faces: { top: tiny, bottom: tiny, front: tiny, back: tiny, left: tiny, right: tiny },
+    bevelMm: 1.5,
+  });
 }
 
 function roundedRectRing(w: number, d: number, r: number, steps: number): { x: number; z: number }[] {

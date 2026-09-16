@@ -45,7 +45,7 @@ export function specFingerprint(
 export function createPieceSpec(
   kind: PieceKind,
   size: SizeMm,
-  extra?: Partial<Pick<PieceSpec, "name" | "thicknessMm" | "core" | "bleedMm" | "cornerRadiusMm">>,
+  extra?: Partial<Pick<PieceSpec, "name" | "thicknessMm" | "core" | "bleedMm" | "cornerRadiusMm" | "sourceTemplateId">>,
 ): PieceSpec {
   const basis = portraitBasis(size);
   return {
@@ -57,7 +57,42 @@ export function createPieceSpec(
     core: kind === "card" ? (extra?.core === "black" ? "black" : "white") : undefined,
     bleedMm: extra?.bleedMm ?? 3,
     cornerRadiusMm: extra?.cornerRadiusMm ?? 3,
+    sourceTemplateId: extra?.sourceTemplateId,
   };
+}
+
+export type PieceSpecTemplate = {
+  id: string;
+  name: string;
+  size: SizeMm;
+  cornerRadiusMm: number;
+  bleedMm: number;
+  thicknessMm: number;
+  note: string;
+};
+
+export const PIECE_SPEC_TEMPLATES: PieceSpecTemplate[] = [
+  { id: "poker", name: "扑克牌", size: { w: 63.5, h: 88.9 }, cornerRadiusMm: 3.5, bleedMm: 3, thicknessMm: 0.32, note: "美式 Poker 2.5×3.5″" },
+  { id: "poker-cn", name: "扑克（公制）", size: { w: 63, h: 88 }, cornerRadiusMm: 3, bleedMm: 3, thicknessMm: 0.32, note: "国内印刷常用" },
+  { id: "bridge", name: "桥牌", size: { w: 57, h: 89 }, cornerRadiusMm: 3, bleedMm: 3, thicknessMm: 0.32, note: "窄牌，一手更好攥" },
+  { id: "sanguosha", name: "三国杀", size: { w: 63, h: 88 }, cornerRadiusMm: 3, bleedMm: 3, thicknessMm: 0.32, note: "角色/装备宽版" },
+  { id: "sanguosha-narrow", name: "三国杀（窄）", size: { w: 57, h: 87 }, cornerRadiusMm: 3, bleedMm: 3, thicknessMm: 0.32, note: "部分版本基本牌/锦囊" },
+  { id: "mtg", name: "万智牌", size: { w: 63.5, h: 88.9 }, cornerRadiusMm: 3.5, bleedMm: 3, thicknessMm: 0.32, note: "与 Poker 同尺寸；宝可梦等多数 TCG 同此" },
+  { id: "yugioh", name: "游戏王", size: { w: 59, h: 86 }, cornerRadiusMm: 3, bleedMm: 3, thicknessMm: 0.32, note: "日式小卡" },
+  { id: "tarot", name: "塔罗牌", size: { w: 70, h: 120 }, cornerRadiusMm: 4, bleedMm: 3, thicknessMm: 0.35, note: "2.75×4.75″ 口径" },
+  { id: "dixit", name: "说书人", size: { w: 80, h: 120 }, cornerRadiusMm: 4, bleedMm: 3, thicknessMm: 0.35, note: "Dixit 类大图卡" },
+  { id: "euro", name: "欧式标准", size: { w: 56, h: 87 }, cornerRadiusMm: 3, bleedMm: 3, thicknessMm: 0.32, note: "多数德式桌游" },
+  { id: "mini-euro", name: "迷你欧卡", size: { w: 44, h: 68 }, cornerRadiusMm: 2.5, bleedMm: 2, thicknessMm: 0.3, note: "Mini Euro" },
+];
+
+export function specFromTemplate(t: PieceSpecTemplate, name?: string): PieceSpec {
+  return createPieceSpec("card", t.size, {
+    name: name ?? t.name,
+    thicknessMm: t.thicknessMm,
+    bleedMm: t.bleedMm,
+    cornerRadiusMm: t.cornerRadiusMm,
+    sourceTemplateId: t.id,
+  });
 }
 
 export function applySpecToBlueprint(bp: Blueprint, spec: PieceSpec, orientation: PieceOrientation): Blueprint {
@@ -164,7 +199,7 @@ export function ensurePieceSpecs(project: Project): Project {
   }
 
   if (!specs.length) {
-    specs = [createPieceSpec("card", project.meta.defaultSize, { name: "默认规格" })];
+    specs = [specFromTemplate(PIECE_SPEC_TEMPLATES[0]!, "扑克牌")];
   }
 
   const nextBlueprints = blueprints.map((bp) => {

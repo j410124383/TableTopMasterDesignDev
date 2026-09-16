@@ -61,6 +61,38 @@ export function SplitHandle({ onDelta }: HandleProps) {
   );
 }
 
+export function SplitHandleY({ onDelta }: { onDelta: (dy: number) => void }) {
+  const dragging = useRef(false);
+  const lastY = useRef(0);
+
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    dragging.current = true;
+    lastY.current = e.clientY;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    const dy = e.clientY - lastY.current;
+    lastY.current = e.clientY;
+    if (dy) onDelta(dy);
+  };
+  const onPointerUp = () => {
+    dragging.current = false;
+  };
+
+  return (
+    <div
+      className="split-handle split-handle-y"
+      role="separator"
+      aria-orientation="horizontal"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    />
+  );
+}
+
 type SplitRowProps = {
   children: ReactNode;
   className?: string;

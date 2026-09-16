@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { spawn } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import {
   access,
   copyFile,
@@ -14,12 +14,14 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect, Plugin } from "vite";
 import { psdBufferToPng } from "./psdToPng";
 
 const execFileAsync = promisify(execFile);
+const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const IMAGE_EXTS = new Set([
   ".png",
@@ -128,31 +130,16 @@ function json(res: ServerResponse, body: unknown, status = 200) {
   res.end(JSON.stringify(body));
 }
 
-async function pickFolderWin(): Promise<{ path?: string; cancel?: boolean }> {
+async function pickFolderWin(startPath = process.cwd()): Promise<{ path?: string; cancel?: boolean }> {
   const out = path.join(os.tmpdir(), `tmd-pick-${Date.now()}.txt`);
-  const escaped = out.replace(/'/g, "''");
-  const ps = `
-    $OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
-    Add-Type -AssemblyName System.Windows.Forms
-    $d = New-Object System.Windows.Forms.FolderBrowserDialog
-    $d.Description = '选择文件夹'
-    $d.ShowNewFolderButton = $true
-    $form = New-Object System.Windows.Forms.Form
-    $form.TopMost = $true
-    $form.StartPosition = 'CenterScreen'
-    $form.Size = New-Object System.Drawing.Size(1,1)
-    $form.Show() | Out-Null
-    $form.Hide()
-    $r = $d.ShowDialog($form)
-    $form.Dispose()
-    if ($r -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }
-    [IO.File]::WriteAllText('${escaped}', $d.SelectedPath, [Text.UTF8Encoding]::new($false))
-  `;
+  const start = startPath && existsSync(startPath) ? startPath : process.cwd();
+  const script = path.join(PLUGIN_DIR, "pickFolder.ps1");
   try {
-    await execFileAsync("powershell.exe", ["-NoProfile", "-STA", "-Command", ps], {
-      timeout: 180000,
-      windowsHide: false,
-    });
+    await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-File", script, "-StartPath", start, "-OutFile", out],
+      { timeout: 180000, windowsHide: false },
+    );
     const picked = (await readFile(out, "utf8")).trim();
     await unlink(out).catch(() => undefined);
     const pathOk = safeWinPath(picked);
@@ -304,6 +291,7 @@ async function writeSplitProject(dir: string, project: Record<string, unknown>):
   await writeJsonDir(path.join(dataDir, "decks"), (project.decks as { id?: string }[]) ?? [], "deck");
   await writeJsonDir(path.join(dataDir, "boxes"), (project.boxes as { id?: string }[]) ?? [], "box");
   await writeJsonDir(path.join(dataDir, "shots"), (project.shots as { id?: string }[]) ?? [], "shot");
+  await writeJsonDir(path.join(dataDir, "boards"), (project.boards as { id?: string }[]) ?? [], "brd");
   await writeFile(path.join(dataDir, "variables.json"), JSON.stringify(project.variables ?? [], null, 2), "utf8");
   await writeFile(path.join(dataDir, "fonts.json"), JSON.stringify(project.fonts ?? [], null, 2), "utf8");
   await writeFile(path.join(dataDir, "assets.json"), JSON.stringify(assetIndex, null, 2), "utf8");
@@ -357,6 +345,7 @@ async function readProjectFolder(dir: string): Promise<unknown> {
     sets: await readJsonDir(path.join(dataDir, "sets")),
     boxes: await readJsonDir(path.join(dataDir, "boxes")),
     shots: await readJsonDir(path.join(dataDir, "shots")),
+    boards: await readJsonDir(path.join(dataDir, "boards")),
     variables: (await readSide("variables.json")) ?? [],
     fonts: (await readSide("fonts.json")) ?? [],
     print: (await readSide("export.json")) ?? parsed.print,
@@ -448,7 +437,17 @@ function handleFs(req: IncomingMessage, res: ServerResponse, next: Connect.NextF
       json(res, { error: "remote" }, 403);
       return;
     }
-    void readBody(req).then(() => pickFolderWin()).then((picked) => {
+    void readBody(req).then((text) => {
+      let start = process.cwd();
+      try {
+        const body = JSON.parse(text || "{}") as { startPath?: string };
+        const wanted = typeof body.startPath === "string" ? safeWinPath(body.startPath) : null;
+        if (wanted && existsSync(wanted)) start = wanted;
+      } catch {
+        /* cwd */
+      }
+      return pickFolderWin(start);
+    }).then((picked) => {
       if (picked.cancel) {
         res.statusCode = 204;
         res.end();

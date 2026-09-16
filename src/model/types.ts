@@ -120,6 +120,8 @@ export type PieceSpec = {
   core?: CardCore;
   bleedMm: number;
   cornerRadiusMm: number;
+  /** 从哪条内置模版复制来的，仅备注 */
+  sourceTemplateId?: string;
 };
 
 export type Blueprint = {
@@ -216,6 +218,7 @@ export type Project = {
   pieceSpecs?: PieceSpec[];
   blueprints: Blueprint[];
   sets: CardSet[];
+  boards?: BoardPiece[];
   boxes?: PackagingBox[];
   shots?: ProductShot[];
   rulebooks?: Rulebook[];
@@ -225,6 +228,16 @@ export type Project = {
   fonts?: ProjectFont[];
   /** Default table layout used when hosting / resetting play. */
   playSetup?: PlaySetupSnapshot;
+};
+
+/** 贴图扣形板件。与卡牌蓝图独立。 */
+export type BoardPiece = {
+  id: string;
+  name: string;
+  textureAssetId: string;
+  thicknessMm: number;
+  /** 平面包络最长边 mm。另一边按贴图像素比。缺省 40 */
+  longestMm?: number;
 };
 
 export type BoxFace = "top" | "bottom" | "front" | "back" | "left" | "right";
@@ -245,7 +258,14 @@ export type UvIsland = {
 export type BoxRenderSetup = {
   position: { x: number; y: number; z: number };
   rotationDeg: { x: number; y: number; z: number };
-  camera: { yaw: number; pitch: number; distance: number; fov: number };
+  camera: {
+    yaw: number;
+    pitch: number;
+    distance: number;
+    fov: number;
+    /** 轨道看向点。缺省原点；Alt+左键平移 */
+    target?: { x: number; y: number; z: number };
+  };
   /** 透视=透视投影；等距=正交。缺省 perspective */
   projection?: "perspective" | "isometric";
   lights: {
@@ -285,11 +305,34 @@ export type ProductShotItem = {
   refId: string;
   setId?: string;
   cardId?: string;
+  /** 卡牌、卡牌集：front 正面朝上（缺省）；back 背面朝上。背面朝上 = 局部 Rx180 再 Ry180，不换顶底贴图 */
   face?: "front" | "back";
   position: { x: number; y: number; z: number };
   rotationDeg: { x: number; y: number; z: number };
   scale?: number;
   slotId?: string;
+  /** 仅 kind=stack。缺省 = 满集 + 牌组形态 */
+  stack?: ShotStackLook;
+};
+
+export type ShotStackShape = "deck" | "messy" | "row" | "fan";
+export type ShotFanDir = "up" | "down";
+
+export type ShotStackLook = {
+  shape?: ShotStackShape;
+  countFrom?: number;
+  countTo?: number;
+  gapMm?: number;
+  fanInnerMm?: number;
+  fanOuterMm?: number;
+  /** @deprecated 旧扇形张角；有 fanInner/Outer 时忽略 */
+  fanDeg?: number;
+  /** @deprecated 旧扇形站姿；卡牌/卡牌集朝上改读 item.face。未写 face 时 down = 背面朝上 */
+  fanDir?: ShotFanDir;
+  fanLeaf?: "bottomUp" | "topDown";
+  /** 一字、扇形：ltr 从左到右（缺省）；rtl 从右到左 */
+  spread?: "ltr" | "rtl";
+  messy?: number;
 };
 
 export type ProductShotLook = {
@@ -302,10 +345,22 @@ export type ProductShotLook = {
   blur?: number;
 };
 
+/** Maya 式场景摄像机。视线沿局部 −Z。 */
+export type ShotCamera = {
+  id: string;
+  name: string;
+  position: { x: number; y: number; z: number };
+  rotationDeg: { x: number; y: number; z: number };
+  fov: number;
+  projection?: "perspective" | "isometric";
+};
+
 export type ProductShot = {
   id: string;
   name: string;
   items: ProductShotItem[];
+  cameras?: ShotCamera[];
+  lookThroughId?: string;
   render: BoxRenderSetup;
   look?: ProductShotLook;
   layoutId?: string;

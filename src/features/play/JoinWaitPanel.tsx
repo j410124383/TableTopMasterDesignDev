@@ -11,6 +11,8 @@ export function JoinWaitPanel({
   report,
   onBack,
   onCopy,
+  title: titleOverride,
+  alwaysBack,
 }: {
   code: string;
   failed: boolean;
@@ -20,14 +22,17 @@ export function JoinWaitPanel({
   packNote?: string;
   report: string;
   onBack: () => void;
-  onCopy: () => void;
+  onCopy?: () => void;
+  title?: string;
+  alwaysBack?: boolean;
 }) {
   const t = useT();
-  const title = failed ? t(kind ? `play.fail.${kind}` : "play.fail.unknown") : t("play.netConnecting");
+  const title = titleOverride ?? (failed ? t(kind ? `play.fail.${kind}` : "play.fail.unknown") : t("play.netConnecting"));
+  const showBack = alwaysBack || failed;
   return (
     <div className="page play-lobby play-net-wait">
       {!failed && <span className="play-net-spin" aria-hidden />}
-      <p className="play-wait-kicker">{t("play.room", { code })}</p>
+      {code ? <p className="play-wait-kicker">{t("play.room", { code })}</p> : <p className="play-wait-kicker">{t("play.solo")}</p>}
       <h1 className={`play-wait-title ${failed ? "fail" : ""}`}>{title}</h1>
       <p className="muted play-wait-hint">{hint || packNote || t("play.netConnecting")}</p>
       <ol className="join-diag-steps">
@@ -43,18 +48,20 @@ export function JoinWaitPanel({
           </li>
         ))}
       </ol>
-      {failed && (
+      {showBack && (
         <div className="row play-wait-actions">
           <button type="button" className="btn btn-primary" onClick={onBack}>
             {t("play.back")}
           </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void navigator.clipboard.writeText(report).then(onCopy)}
-          >
-            {t("play.copyDiag")}
-          </button>
+          {failed && onCopy && report ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void navigator.clipboard.writeText(report).then(onCopy)}
+            >
+              {t("play.copyDiag")}
+            </button>
+          ) : null}
         </div>
       )}
     </div>

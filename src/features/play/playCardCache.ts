@@ -77,6 +77,7 @@ export async function warmPlayCardCache(
   pieces: Array<{ setId: string; card: { id: string; fields: Record<string, string> }; face: string; id: string }>,
   project: Project,
   resolveTpl: ResolveTpl,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
   const jobs = new Map<string, () => Promise<HTMLCanvasElement>>();
   const seenCards = new Set<string>();
@@ -105,9 +106,18 @@ export async function warmPlayCardCache(
 
   const batch = 6;
   const entries = [...jobs.entries()];
+  const total = entries.length;
+  onProgress?.(0, total);
+  let done = 0;
   for (let i = 0; i < entries.length; i += batch) {
     const slice = entries.slice(i, i + batch);
-    await Promise.all(slice.map(([hash, render]) => ensurePlayCardOnServer(hash, render)));
+    await Promise.all(
+      slice.map(async ([hash, render]) => {
+        await ensurePlayCardOnServer(hash, render);
+        done += 1;
+        onProgress?.(done, total);
+      }),
+    );
   }
 }
 

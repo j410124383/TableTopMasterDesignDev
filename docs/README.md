@@ -44,14 +44,15 @@
 
 ## 功能规格索引
 
-桌游创作三个维度：
+桌游创作维度：
 
-- [pieces.md](./features/pieces.md) — 卡牌 / 板件（规格预览块、蓝图与数据集；卡牌纸厚与卡芯、板件板厚写在规格上）
+- [pieces.md](./features/pieces.md) — 卡牌（规格预览块、蓝图与数据集；纸厚与卡芯）
+- [boards.md](./features/boards.md) — 板件（与包装盒并列；贴图 alpha 扣形 + 厚度）
 - [packaging.md](./features/packaging.md) — 包装盒（方盒参数、一张贴图与铺法、棱倒角、每面 UV 壳、单盒渲染）
 - [product-render.md](./features/product-render.md) — 产品渲染（场景库、透视/等距、控制杆、布局模版、描边与滤镜）
 - [rulebook.md](./features/rulebook.md) — 说明书
 
-卡牌/板件内的现有能力：
+卡牌内的现有能力：
 
 - [template-editor.md](./features/template-editor.md) — 蓝图编辑、图层、变量绑定
 - [sets-and-deck.md](./features/sets-and-deck.md) — 数据集浏览、卡组表格编辑
@@ -61,5 +62,7 @@
 
 - [play-mode.md](./features/play-mode.md) — 对战、联机、牌桌
 - [workspace-home.md](./features/workspace-home.md) — 首页、项目、工作区
+- [offline-pack.md](./features/offline-pack.md) — Windows / Mac 离线 zip（解压双击启动，内置 Node）
+- [desktop-app.md](./features/desktop-app.md) — 日常用 TMD 窗口，不经系统浏览器；为后期序列帧打底
 - [market-community.md](./features/market-community.md) — 市场、论坛、新闻
 - [ui-consistency.md](./features/ui-consistency.md) — 颜色、文件导入、次级界面等 UI 约定

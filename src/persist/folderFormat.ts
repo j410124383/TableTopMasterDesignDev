@@ -1,6 +1,6 @@
 import { DEFAULT_PRINT } from "@/model/defaults";
 import { validateProject } from "@/model/schema";
-import type { Blueprint, CardSet, Deck, PackagingBox, PieceSpec, PrintSettings, ProductShot, Project, ProjectMeta, Rulebook, Template } from "@/model/types";
+import type { Blueprint, BoardPiece, CardSet, Deck, PackagingBox, PieceSpec, PrintSettings, ProductShot, Project, ProjectMeta, Rulebook, Template } from "@/model/types";
 import {
   ensureSubdir,
   fileExists,
@@ -222,6 +222,14 @@ export async function writeProjectToFolder(
   for (const shot of project.shots ?? []) {
     await writeTextFile(shotDir, `${shot.id}.json`, JSON.stringify(shot, null, 2));
   }
+  const boardDir = await ensureSubdir(data, "boards");
+  const keepBoard = new Set((project.boards ?? []).map((b) => `${b.id}.json`));
+  for (const name of await listFileNames(boardDir)) {
+    if (name.endsWith(".json") && !keepBoard.has(name)) await removeFile(boardDir, name);
+  }
+  for (const board of project.boards ?? []) {
+    await writeTextFile(boardDir, `${board.id}.json`, JSON.stringify(board, null, 2));
+  }
   await writeTextFile(data, "rulebooks.json", JSON.stringify(project.rulebooks ?? [], null, 2));
 }
 
@@ -308,6 +316,14 @@ export async function readProjectFromFolder(
           shots.push(JSON.parse(await readTextFile(shotDir, name)) as ProductShot);
         }
       }
+      const boards: BoardPiece[] = [];
+      const boardDir = data ? await tryGetDir(data, "boards") : null;
+      if (boardDir) {
+        for (const name of await listFileNames(boardDir)) {
+          if (!name.endsWith(".json")) continue;
+          boards.push(JSON.parse(await readTextFile(boardDir, name)) as BoardPiece);
+        }
+      }
       const rulebooks = data
         ? (JSON.parse((await tryReadText(data, "rulebooks.json")) || "[]") as Rulebook[])
         : [];
@@ -341,6 +357,7 @@ export async function readProjectFromFolder(
         print,
         boxes,
         shots,
+        boards,
         rulebooks,
       });
     }

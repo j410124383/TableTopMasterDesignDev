@@ -1,5 +1,6 @@
 import { uid } from "@/lib/id";
 import { defaultBoxRender } from "./box";
+import { ensureShotCameras } from "./shotCamera";
 import type { ProductShot, ProductShotItem, ProductShotLook } from "./types";
 
 export function defaultShotLook(): ProductShotLook {
@@ -15,13 +16,13 @@ export function defaultShotLook(): ProductShotLook {
 }
 
 export function createProductShot(name = "产品图 1"): ProductShot {
-  return {
+  return ensureShotCameras({
     id: uid("shot"),
     name,
     items: [],
     render: defaultBoxRender(120, 120, 80),
     look: defaultShotLook(),
-  };
+  });
 }
 
 export function ensureShotLook(look?: ProductShotLook): ProductShotLook {

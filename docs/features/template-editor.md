@@ -1,6 +1,6 @@
 # 蓝图编辑器（Template Editor）
 
-> 属于桌游创作的 **卡牌 / 板件** 维度，见 [pieces.md](./pieces.md)。  
+> 属于桌游创作的 **卡牌** 维度，见 [pieces.md](./pieces.md)。板件见 [boards.md](./boards.md)。  
 > `[反推]` 路由：`/project/template`。源码：`src/features/template/`。
 
 ## 用户故事

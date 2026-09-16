@@ -1,6 +1,6 @@
 # 数据集与卡组（Sets & Deck）
 
-> 属于桌游创作的 **卡牌 / 板件** 维度，见 [pieces.md](./pieces.md)。蓝图与数据集不出现在包装盒、说明书里。  
+> 属于桌游创作的 **卡牌** 维度，见 [pieces.md](./pieces.md)。蓝图与数据集不出现在板件、包装盒、说明书里。  
 > `[反推]` 路由：`/project/sets`（浏览）、`/project/deck`（表格）。源码：`src/features/sets/`、`src/features/deck/`。
 
 ## 用户故事

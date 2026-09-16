@@ -1,4 +1,5 @@
 export const APP_ZIP = "/TMD-offline.zip";
+export const APP_ZIP_MAC = "/TMD-offline-mac.zip";
 
 export async function zipDownloadReady(url = APP_ZIP): Promise<boolean> {
   try {

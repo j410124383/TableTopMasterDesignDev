@@ -13,6 +13,7 @@ import {
   loadIndex,
   mergeExampleEntries,
   openFromDirectory,
+  openFromDroppedItems,
   openProjectById,
   pickDirectory,
   rememberSubscribed,
@@ -72,6 +73,7 @@ type AppState = {
   open: (id: string) => Promise<void>;
   openFile: (text: string, pathLabel?: string) => Promise<void>;
   openFolder: () => Promise<boolean>;
+  openDropped: (dt: DataTransfer) => Promise<boolean>;
   relinkFolder: () => Promise<void>;
   relinkById: (id: string) => Promise<void>;
   close: () => void;
@@ -192,6 +194,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   openFolder: async () => {
     const result = await openFromDirectory();
     if (!result) return false;
+    const index = await loadIndex();
+    const path = result.entry.localPath || result.entry.path;
+    set({
+      index,
+      current: withDisplayAssets(result.project, path),
+      currentPath: path,
+      dirty: false,
+      error: null,
+      currentOrigin: "owned",
+      ...resetHistory(),
+    });
+    resetEditorSession();
+    return true;
+  },
+
+  openDropped: async (dt) => {
+    const result = await openFromDroppedItems(dt);
     const index = await loadIndex();
     const path = result.entry.localPath || result.entry.path;
     set({

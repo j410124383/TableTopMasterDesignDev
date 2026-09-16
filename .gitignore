@@ -5,6 +5,7 @@ dist-ssr
 *.local
 src-tauri/target
 src-tauri/gen
+.tmd-webview
 .DS_Store
 data/market
 data/play-cache
@@ -12,6 +13,16 @@ release
 public/桌游大师-离线包.zip
 public/TMD-离线包.zip
 public/TMD-offline.zip
+public/TMD-offline-mac.zip
 vendor/node
+vendor/node-darwin-arm64
 vendor/node-v*-win-x64.zip
+vendor/node-v*-darwin-arm64.tar.gz
 vendor/_node_extract
+vendor/_node_extract_win
+vendor/_node_extract_mac
+TMD.exe
+TMD.pdb
+desktop/bin
+desktop/obj
+desktop/dist

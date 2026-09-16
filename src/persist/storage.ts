@@ -643,6 +643,91 @@ export async function openFromDirectory(): Promise<{
   return { project, entry };
 }
 
+async function adoptDiskProject(native: string, raw: unknown) {
+  const project = validateProject(raw);
+  await cacheProject(project);
+  const index = await loadIndex();
+  const existing = index.projects.find((p) => p.id === project.meta.id);
+  const entry = entryFrom(project, native, {
+    origin: "owned",
+    localPath: native,
+    lastOpenedAt: nowIso(),
+  });
+  await saveIndex(upsertEntry(index, { ...existing, ...entry }));
+  rememberLastSaveDir(native);
+  return { project, entry };
+}
+
+export async function openFromDiskPath(input: string): Promise<{ project: Project; entry: AppIndexEntry }> {
+  const cleaned = input.replace(/[\\/]+$/, "");
+  const base = cleaned.replace(/[\\/][^\\/]+$/, "");
+  const name = (cleaned.split(/[\\/]/).pop() ?? "").toLowerCase();
+  const candidates = [cleaned];
+  if (name === "project.json" || name.endsWith(".ceditor") || name.endsWith(".json")) candidates.push(base);
+  if (name === "project.json" && /[\\/]data$/i.test(base)) candidates.push(base.replace(/[\\/]data$/i, ""));
+  for (const dir of candidates) {
+    const raw = await readProjectFromDisk(dir);
+    if (raw) return adoptDiskProject(dir, raw);
+  }
+  throw new Error("这不是 TMD 工程。请拖入带 .ceditor 或 data/project.json 的项目文件夹。");
+}
+
+export async function openFromDirectoryHandle(dir: FileSystemDirectoryHandle): Promise<{ project: Project; entry: AppIndexEntry }> {
+  if (!(await isCardEditorFolder(dir))) {
+    throw new Error("这不是 TMD 工程。请拖入带 .ceditor 或 data/project.json 的项目文件夹。");
+  }
+  const project = await readProjectFromFolder(dir);
+  await setProjectHandle(project.meta.id, dir);
+  await cacheProject(project);
+  const index = await loadIndex();
+  const existing = index.projects.find((p) => p.id === project.meta.id);
+  let disk = keepDiskMeta(existing, dir.name, { origin: "owned" });
+  if (!looksLikeFullPath(disk.path) && !looksLikeFullPath(disk.localPath ?? "")) {
+    const inferred = inferSaveDirPath(dir.name, index.projects);
+    if (inferred) disk = { ...disk, path: inferred, localPath: inferred };
+  }
+  const entry = entryFrom(project, disk.path, disk);
+  await saveIndex(upsertEntry(index, entry));
+  return { project, entry };
+}
+
+export async function openFromDroppedItems(dt: DataTransfer): Promise<{ project: Project; entry: AppIndexEntry }> {
+  const items = [...dt.items];
+  for (const item of items) {
+    const getter = (item as DataTransferItem & { getAsFileSystemHandle?: () => Promise<FileSystemHandle | null> }).getAsFileSystemHandle;
+    if (!getter) continue;
+    try {
+      const handle = await getter.call(item);
+      if (!handle) continue;
+      if (handle.kind === "directory") return openFromDirectoryHandle(handle as FileSystemDirectoryHandle);
+      if (handle.kind === "file") {
+        const file = await (handle as FileSystemFileHandle).getFile();
+        const disk = (file as File & { path?: string }).path;
+        if (disk && looksLikeFullPath(disk)) return openFromDiskPath(disk);
+        return rejectDroppedFile(file);
+      }
+    } catch (err) {
+      if (err instanceof Error && /TMD 工程|不支持|zip/.test(err.message)) throw err;
+    }
+  }
+  const file = dt.files[0];
+  if (!file) throw new Error("没有可打开的内容。请拖入 TMD 项目文件夹。");
+  const disk = (file as File & { path?: string }).path;
+  if (disk && looksLikeFullPath(disk)) return openFromDiskPath(disk);
+  return rejectDroppedFile(file);
+}
+
+function rejectDroppedFile(file: File): never {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".zip")) {
+    throw new Error("暂不支持拖入 zip。请先解压成项目文件夹再拖入，或点「打开」选文件夹。");
+  }
+  if (name.endsWith(".json")) {
+    throw new Error("拖入的是单个 JSON。请把整个项目文件夹拖进来（里面应有 .ceditor 或 data/project.json）。");
+  }
+  throw new Error(`不支持打开「${file.name}」。请拖入 TMD 项目文件夹（含 .ceditor 或 data/project.json）。`);
+}
+
 export async function relinkProjectFolder(projectId: string): Promise<{
   path: string;
   project: Project;

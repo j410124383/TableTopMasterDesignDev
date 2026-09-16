@@ -1,21 +1,49 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { BRAND } from "@/brand";
-import { APP_ZIP, zipDownloadReady } from "@/lib/appZip";
+import { APP_ZIP, APP_ZIP_MAC, zipDownloadReady } from "@/lib/appZip";
 import { APP_VERSION, versionStamp } from "@/lib/appVersion";
 import { useT } from "@/store/localeStore";
 import { Brand, SiteTags } from "@/ui/Brand";
 import { PrefsMenu } from "@/ui/PrefsMenu";
 
-export { APP_ZIP };
+export { APP_ZIP, APP_ZIP_MAC };
+
+function ZipBtn({
+  href,
+  ready,
+  label,
+}: {
+  href: string;
+  ready: boolean | null;
+  label: string;
+}) {
+  if (ready) {
+    return (
+      <a className="btn btn-primary land-dl" href={href} download>
+        {label}
+      </a>
+    );
+  }
+  return (
+    <button type="button" className="btn btn-primary land-dl" disabled>
+      {label}
+    </button>
+  );
+}
 
 export function LandingPage() {
   const t = useT();
-  const [hasZip, setHasZip] = useState<boolean | null>(null);
+  const [hasWin, setHasWin] = useState<boolean | null>(null);
+  const [hasMac, setHasMac] = useState<boolean | null>(null);
 
   useEffect(() => {
-    void zipDownloadReady().then(setHasZip);
+    void zipDownloadReady(APP_ZIP).then(setHasWin);
+    void zipDownloadReady(APP_ZIP_MAC).then(setHasMac);
   }, []);
+
+  const v = `v${APP_VERSION}`;
+  const bothMissing = hasWin === false && hasMac === false;
 
   return (
     <div className="land-root">
@@ -36,20 +64,13 @@ export function LandingPage() {
         <p className="land-lead">{t("land.hero")}</p>
         <p className="muted">{t("land.sub")}</p>
         <div className="land-cta">
-          {hasZip ? (
-            <a className="btn btn-primary land-dl" href={APP_ZIP} download>
-              {t("land.download", { v: `v${APP_VERSION}` })}
-            </a>
-          ) : (
-            <button type="button" className="btn btn-primary" disabled>
-              {t("land.download", { v: `v${APP_VERSION}` })}
-            </button>
-          )}
+          <ZipBtn href={APP_ZIP} ready={hasWin} label={t("land.downloadWin", { v })} />
+          <ZipBtn href={APP_ZIP_MAC} ready={hasMac} label={t("land.downloadMac", { v })} />
           <Link className="btn" to="/app">
             {t("land.try")}
           </Link>
         </div>
-        {hasZip === false && <p className="banner">{t("land.missing")}</p>}
+        {bothMissing && <p className="banner">{t("land.missing")}</p>}
         <p className="muted">{t("land.ver", { stamp: versionStamp() })}</p>
       </section>
 
@@ -62,6 +83,7 @@ export function LandingPage() {
           </article>
         ))}
       </section>
+      <p className="muted land-mac-hint">{t("land.macHint")}</p>
 
       <section className="land-feats">
         {[1, 2, 3].map((n) => (

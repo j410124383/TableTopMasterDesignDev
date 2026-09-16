@@ -14,6 +14,7 @@ import { VarsPage } from "@/features/vars/VarsPage";
 import { MarketPage } from "@/features/market/MarketPage";
 import { WorkspaceLayout } from "@/features/workspace/WorkspaceLayout";
 import { BoxPage } from "@/features/box/BoxPage";
+import { BoardPage } from "@/features/board/BoardPage";
 import { ManualPage } from "@/features/manual/ManualPage";
 import { ShotPage } from "@/features/shot/ShotPage";
 import { useAppStore } from "@/store/appStore";
@@ -115,6 +116,7 @@ function AppRoutes({ current }: { current: boolean }) {
           <Route path="print" element={<PrintPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="box" element={<BoxPage />} />
+          <Route path="board" element={<BoardPage />} />
           <Route path="shot" element={<ShotPage />} />
           <Route path="manual" element={<ManualPage />} />
         </Route>

@@ -182,6 +182,16 @@ export function PlayPage({ setupMode = false }: { setupMode?: boolean } = {}) {
   );
   const joiningCode = setupMode ? "" : (params.get("join") ?? "").trim().toUpperCase();
   const [lobby, setLobby] = useState(setupMode ? false : !joiningCode);
+  const [hostPrep, setHostPrep] = useState<{
+    mode: "solo" | "host";
+    code: string;
+    failed: boolean;
+    steps: DiagStep[];
+    cardGot: number;
+    cardTotal: number;
+    hint: string;
+  } | null>(null);
+  const prepAbort = useRef({ aborted: false });
   const [role, setRole] = useState<"solo" | "host" | "guest">("solo");
   const [roomId, setRoomId] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState("");
@@ -819,8 +829,9 @@ export function PlayPage({ setupMode = false }: { setupMode?: boolean } = {}) {
   }
 
   useEffect(() => {
+    if (hostPrep) return;
     if (!lobby && current && pieces.length === 0 && role !== "guest") reset();
-  }, [lobby, current, pieces.length, reset, role]);
+  }, [lobby, current, pieces.length, reset, role, hostPrep]);
 
   useEffect(() => {
     if (applyingRef.current) {
@@ -1938,47 +1949,142 @@ export function PlayPage({ setupMode = false }: { setupMode?: boolean } = {}) {
     netRef.current?.send({ from: me.id, kind: "chat", text, name: me.name });
   }
 
-  function startSolo() {
-    setPlayers(withRoomSeats([{ ...me, color: profile.color || "", team: "p1", host: true }]));
+  function cancelPrep() {
+    prepAbort.current.aborted = true;
+    const code = hostPrep?.code;
+    netRef.current?.close();
+    netRef.current = null;
+    if (code) void unpublishRoom(code);
+    setHostPrep(null);
     setRoomId(null);
     setRole("solo");
-    setLobby(false);
+    setLobby(true);
     setPieces([]);
   }
 
+  async function beginOpenRoom(mode: "solo" | "host") {
+    if (!current) return;
+    prepAbort.current = { aborted: false };
+    const aborted = () => prepAbort.current.aborted;
+    const code = mode === "host" ? newRoomCode() : "";
+    const steps0: DiagStep[] = [
+      { id: "table", status: "wait" },
+      { id: "cards", status: "wait" },
+      { id: "net", status: "wait" },
+    ];
+    setHostPrep({
+      mode,
+      code,
+      failed: false,
+      steps: steps0,
+      cardGot: 0,
+      cardTotal: 0,
+      hint: t("play.prep.lead"),
+    });
+    try {
+      const next = applyPlaySetup(current);
+      Object.assign(anchorsRef.current, next.anchors);
+      if (aborted()) return;
+      setHostPrep((p) => p && { ...p, steps: patchSteps(p.steps, "table", "ok") });
+
+      const { currentPath } = useAppStore.getState();
+      const project =
+        currentPath && !currentPath.includes("联机")
+          ? { ...current, assets: absolutizeAssets(current.assets ?? {}, currentPath) }
+          : current;
+      const resolve: ResolveTpl = (piece, forceFace) => {
+        const set = project.sets.find((s) => s.id === piece.setId);
+        const pair = templatesRef.current.get(set?.blueprintId ?? "");
+        const face = forceFace ?? piece.face;
+        return face === "front" ? pair?.front : pair?.back;
+      };
+      setHostPrep((p) => p && { ...p, steps: patchSteps(p.steps, "cards", "wait") });
+      await warmPlayCardCache(next.pieces, project, resolve, (got, total) => {
+        if (aborted()) return;
+        setHostPrep((p) =>
+          p && {
+            ...p,
+            cardGot: got,
+            cardTotal: total,
+            steps: patchSteps(p.steps, "cards", "wait", t("play.prep.cardsNote", { got, total })),
+          },
+        );
+      });
+      if (aborted()) return;
+      const warmed = withPlayThumbUrls(next.pieces, resolve);
+      setHostPrep((p) => p && { ...p, steps: patchSteps(p.steps, "cards", "ok", t("play.prep.cardsNote", { got: p.cardGot, total: p.cardTotal })) });
+
+      if (mode === "host") {
+        setHostPrep((p) => p && { ...p, steps: patchSteps(p.steps, "net", "wait") });
+        verWarned.current = false;
+        const host = withRoomSeats([{ ...me, color: profile.color || "", team: "p1", host: true }])[0];
+        netRef.current?.close();
+        netRef.current = createPlayNet(code, (m) => applyRef.current(m), {
+          wan: true,
+          asHost: true,
+          onWan: handleWan,
+          onPeer: () => pushHostTable(),
+        });
+        netRef.current.send({ from: me.id, kind: "hello", projectId: current.meta.id, players: [host] });
+        await publishRoom({
+          id: code,
+          name: current.meta.name ?? "试玩房",
+          hostName: host.name,
+          players: 1,
+          maxPlayers: roomMax,
+          private: roomPrivate,
+          password: roomPassword || undefined,
+          version: APP_VERSION,
+          protocol: PLAY_PROTOCOL,
+        });
+        if (aborted()) {
+          netRef.current?.close();
+          netRef.current = null;
+          void unpublishRoom(code);
+          return;
+        }
+        const phoneLinks = (lanOrigins.length ? lanOrigins : [window.location.origin]).map((o) => playJoinUrl(code, o));
+        logNet(t("play.hostLanHint", { code, url: phoneLinks[0] ?? playJoinUrl(code) }));
+        setPlayers([{ ...host, host: true }]);
+        setRole("host");
+        setRoomId(code);
+        setWanBusy(true);
+        joinAtRef.current = Date.now();
+        setHostPrep((p) => p && { ...p, steps: patchSteps(p.steps, "net", "ok") });
+      } else {
+        setPlayers(withRoomSeats([{ ...me, color: profile.color || "", team: "p1", host: true }]));
+        setRoomId(null);
+        setRole("solo");
+        setHostPrep((p) => p && { ...p, steps: patchSteps(p.steps, "net", "skip", t("play.prep.netSkip")) });
+      }
+      if (aborted()) return;
+      piecesRef.current = warmed;
+      setPieces(warmed);
+      setProps(next.props);
+      zRef.current = Math.max(20, ...warmed.map((p) => p.z), ...next.props.map((p) => p.z));
+      setNetHint("");
+      setLobby(false);
+      setHostPrep(null);
+    } catch (err) {
+      if (aborted()) return;
+      const msg = err instanceof Error ? err.message : "unknown";
+      setHostPrep((p) =>
+        p && {
+          ...p,
+          failed: true,
+          hint: msg,
+          steps: p.steps.map((s) => (s.status === "wait" ? { ...s, status: "fail" as const, note: msg } : s)),
+        },
+      );
+    }
+  }
+
+  function startSolo() {
+    void beginOpenRoom("solo");
+  }
+
   function startHost() {
-    const code = newRoomCode();
-    verWarned.current = false;
-    const host = withRoomSeats([{ ...me, color: profile.color || "", team: "p1", host: true }])[0];
-    setPlayers([{ ...host, host: true }]);
-    setRole("host");
-    setRoomId(code);
-    joinAtRef.current = Date.now();
-    netRef.current?.close();
-    netRef.current = createPlayNet(code, (m) => applyRef.current(m), {
-      wan: true,
-      asHost: true,
-      onWan: handleWan,
-      onPeer: () => pushHostTable(),
-    });
-    netRef.current.send({ from: me.id, kind: "hello", projectId: current?.meta.id, players: [host] });
-    void publishRoom({
-      id: code,
-      name: current?.meta.name ?? "试玩房",
-      hostName: host.name,
-      players: 1,
-      maxPlayers: roomMax,
-      private: roomPrivate,
-      password: roomPassword || undefined,
-      version: APP_VERSION,
-      protocol: PLAY_PROTOCOL,
-    });
-    const phoneLinks = (lanOrigins.length ? lanOrigins : [window.location.origin]).map((o) => playJoinUrl(code, o));
-    logNet(t("play.hostLanHint", { code, url: phoneLinks[0] ?? playJoinUrl(code) }));
-    setNetHint("");
-    setWanBusy(true);
-    setLobby(false);
-    setPieces([]);
+    void beginOpenRoom("host");
   }
 
   function leaveSeat() {
@@ -2462,6 +2568,38 @@ export function PlayPage({ setupMode = false }: { setupMode?: boolean } = {}) {
         <div className="page play-lobby">
           <p className="muted">正在识别本机玩家…</p>
         </div>
+      </div>
+    );
+  }
+
+  if (hostPrep) {
+    return (
+      <div className="play-root play-scene">
+        <header className="topbar">
+          <div className="row">
+            <button className="btn btn-ghost btn-small" onClick={cancelPrep}>
+              {t("play.back")}
+            </button>
+            <strong>{t("play.title")}{current ? ` · ${current.meta.name}` : ""}</strong>
+            <span className="muted" style={{ fontSize: 12 }}>{versionStamp()}</span>
+          </div>
+          <PrefsMenu />
+        </header>
+        <JoinWaitPanel
+          code={hostPrep.code}
+          failed={hostPrep.failed}
+          hint={hostPrep.hint}
+          steps={hostPrep.steps}
+          packNote={
+            hostPrep.cardTotal > 0
+              ? t("play.prep.cardsNote", { got: hostPrep.cardGot, total: hostPrep.cardTotal })
+              : undefined
+          }
+          report=""
+          title={hostPrep.failed ? t("play.prep.fail") : hostPrep.mode === "solo" ? t("play.prep.soloTitle") : t("play.prep.title")}
+          alwaysBack
+          onBack={cancelPrep}
+        />
       </div>
     );
   }
