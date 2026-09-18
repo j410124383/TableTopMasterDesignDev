@@ -1,0 +1,22 @@
+---
+description: 按片区改、复用现成轮子 — 先读 docs/handbook.md
+alwaysApply: true
+---
+
+# 片区与轮子
+
+改功能前先读 [`docs/handbook.md`](docs/handbook.md) 的「片区」和「改 X 动哪」。
+
+## 必须
+
+- **只动一个片区的实现**，外加必要调用。产品渲染 / 影棚里的盒子调用 `resolvePackagingDrawItems` / `packagingPartMeshes` / `packagingLookOf`，保留 `coverBase`
+- 开合用 `boxLidLiftVec` 位移；`lidOpen` 不准进贴图 cache key，不准出工作锁
+- 3D 只用 `BoxGl`；卡面只用 `drawCard.ts`；颜色 / 锁 / 分页 / 分栏用 `src/ui`
+- 影棚只组合：演员走包装/卡面轮子，布景走 `shotResolve`，禁止第二套 WebGL / 自由控制杆主交互
+
+## 禁止
+
+- 为产品场景或影棚再写一套 tray / shader / `boxMesh` 冒充天地盒
+- 转镜头、底色、开合时重建模型或重载印刷图
+- 新 `<input type="color">`、私有 loading 遮罩、第二套写盘路径
+- 修 bug 时顺手合并 Viewport 或还历史债

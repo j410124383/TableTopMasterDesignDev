@@ -19,6 +19,17 @@ const zipMacPath = join(releaseDir, zipMacName);
 await ensureBundledNode(root, "win");
 await ensureBundledNode(root, "mac");
 
+console.log("building dist…");
+execSync("npm run build", { cwd: root, stdio: "inherit" });
+if (!existsSync(join(root, "dist", "index.html"))) {
+  throw new Error("缺少 dist/index.html，无法打出发版包");
+}
+
+console.log("building TMD.exe…");
+execSync("npm run desktop:exe", { cwd: root, stdio: "inherit" });
+const exeSrc = join(root, "TMD.exe");
+if (!existsSync(exeSrc)) throw new Error("缺少 TMD.exe，无法打 Windows 包");
+
 const include = [
   "package.json",
   "package-lock.json",
@@ -30,6 +41,7 @@ const include = [
   "src",
   "plugins",
   "public",
+  "dist",
   "scripts/print-lan.mjs",
   "scripts/version.mjs",
   "scripts/lanDetect.mjs",
@@ -42,10 +54,30 @@ function copyFiltered(from, to) {
     recursive: true,
     filter: (src) => {
       const parts = src.split(sep);
-      if (parts.includes(".vite") || parts.includes(".cache") || parts.some((p) => p.startsWith("_node_extract"))) return false;
+      if (parts.includes(".vite") || parts.includes(".cache") || parts.includes("@tauri-apps")) return false;
+      if (parts.some((p) => p.startsWith("_node_extract"))) return false;
       if (/\.(zip|tgz|tar\.gz)$/i.test(src)) return false;
       return true;
     },
+  });
+}
+
+function copyNodeModules(dest) {
+  const from = join(root, "node_modules");
+  if (!existsSync(join(from, "vite"))) {
+    throw new Error("缺少 node_modules/vite，请先在开发机 npm install");
+  }
+  copyFiltered(from, join(dest, "node_modules"));
+}
+
+function installMacNatives(dest) {
+  const npmCmd = existsSync(join(root, "vendor", "node", "npm.cmd"))
+    ? join(root, "vendor", "node", "npm.cmd")
+    : "npm.cmd";
+  copyNodeModules(dest);
+  execSync(`"${npmCmd}" install --no-save --force @esbuild/darwin-arm64@0.28.2 @rollup/rollup-darwin-arm64@4.63.1`, {
+    cwd: dest,
+    stdio: "inherit",
   });
 }
 
@@ -53,7 +85,7 @@ function writeLf(dest, lines) {
   writeFileSync(dest, `${lines.join("\n")}\n`.replace(/\r\n/g, "\n"), "utf8");
 }
 
-function stageCommon(dest) {
+function stageCommon(dest, { nodeModules = "copy" } = {}) {
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
   mkdirSync(join(dest, "scripts"), { recursive: true });
@@ -64,6 +96,8 @@ function stageCommon(dest) {
   }
   writeFileSync(join(dest, "tmd-version.json"), `${JSON.stringify(packed, null, 2)}\n`, "utf8");
   writeFileSync(join(dest, "VERSION.txt"), `${versionNotes(packed)}\n`, "utf8");
+  if (nodeModules === "copy") copyNodeModules(dest);
+  else installMacNatives(dest);
 }
 
 function copyLauncherLf(fromName, dest) {
@@ -75,12 +109,6 @@ mkdirSync(releaseDir, { recursive: true });
 stageCommon(staging);
 copyFiltered(bundledNodeDir(root, "win"), join(staging, "vendor", "node"));
 copyFiltered(join(root, "打开卡牌工坊.bat"), join(staging, "打开卡牌工坊.bat"));
-const exeSrc = join(root, "TMD.exe");
-if (!existsSync(exeSrc)) {
-  console.log("building TMD.exe…");
-  execSync("npm run desktop:exe", { cwd: root, stdio: "inherit" });
-}
-if (!existsSync(exeSrc)) throw new Error("缺少 TMD.exe，无法打 Windows 包");
 copyFileSync(exeSrc, join(staging, "TMD.exe"));
 writeLf(join(staging, "使用说明.txt"), [
   "TMD · TABLETOP MASTER DESIGN",
@@ -94,7 +122,7 @@ writeLf(join(staging, "使用说明.txt"), [
   "3. 双击 TMD.exe",
   "4. 出现 TMD 窗口。关掉窗口即结束。同一 Wi-Fi 对方用浏览器打开局域网地址，不要再双击启动。",
   "",
-  "第一次若还没有 node_modules，脚本会用国内镜像自动安装依赖。",
+  "界面已预构建，双击即可，不必再安装依赖。",
   "苹果电脑请改用 TMD-offline-mac.zip，不要解压这份。",
   "",
 ]);
@@ -118,7 +146,8 @@ rmSync(ps1, { force: true });
 cpSync(zipWinPath, join(root, "public", zipWinName));
 console.log(`packed ${zipWinPath}`);
 
-stageCommon(stagingMac);
+console.log("installing Mac preview dependencies…");
+stageCommon(stagingMac, { nodeModules: "ci-mac" });
 copyFiltered(bundledNodeDir(root, "mac"), join(stagingMac, "vendor", "node"));
 copyLauncherLf("打开卡牌工坊.command", join(stagingMac, "打开卡牌工坊.command"));
 writeLf(join(stagingMac, "使用说明.txt"), [
@@ -139,7 +168,7 @@ writeLf(join(stagingMac, "使用说明.txt"), [
   "  chmod +x 打开卡牌工坊.command",
   "然后再双击。",
   "",
-  "第一次若还没有 node_modules，脚本会用国内镜像自动安装依赖。",
+  "界面已预构建，双击即可，不必再安装依赖。",
   "",
 ]);
 

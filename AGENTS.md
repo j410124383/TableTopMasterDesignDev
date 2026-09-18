@@ -13,12 +13,13 @@
 ## 开始任何实现前
 
 1. 读 [`docs/README.md`](docs/README.md) 了解协作协议
-2. 读相关规格：
+2. 读 [`docs/handbook.md`](docs/handbook.md)：**片区所有权**和「改 X 动哪」表。只动所属片区，复用已有轮子，禁止再抄一套 3D / 卡面 / 工作锁
+3. 读相关规格：
    - 产品意图 → [`docs/vision.md`](docs/vision.md)
    - 架构约束 → [`docs/architecture.md`](docs/architecture.md)
    - 数据结构 → [`docs/data-model.md`](docs/data-model.md)
    - 功能细节 → [`docs/features/`](docs/features/) 对应文件
-3. 检查 [`docs/changelog.md`](docs/changelog.md) 中的 `[待同步]` 项
+4. 检查 [`docs/changelog.md`](docs/changelog.md) 中的 `[待同步]` 项
 
 ## 优先级
 
@@ -42,7 +43,8 @@
 
 ## 代码约定
 
-- 遵循现有模块分层（见 architecture.md）
+- 遵循现有模块分层与 [handbook.md](docs/handbook.md) 片区边界
+- 包装盒网格/印刷/材质只在 `features/box`；产品渲染只组合，不复制 tray / shader
 - 数据变更经 `appStore.patchProject()`，保持 undo 栈
 - 新字段先更新 data-model.md，再改 types.ts
 

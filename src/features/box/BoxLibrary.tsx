@@ -94,7 +94,6 @@ export function BoxLibrary() {
         <div className="bp-grid">
           {boxes.map((box) => {
             const render = ensureBoxRender(box);
-            const tex = box.textureAssetId ? current.assets[box.textureAssetId] ?? null : null;
             return (
               <article
                 key={box.id}
@@ -106,9 +105,9 @@ export function BoxLibrary() {
               >
                 <button type="button" className="bp-faces box-lib-faces" onClick={() => openBox(box.id)}>
                   <BoxViewport
-                    box={box}
+                    box={{ ...box, lidOpen: 0 }}
                     render={render}
-                    textureSrc={tex}
+                    assets={current.assets}
                     projectDir={currentPath}
                     gizmos={false}
                     className="box-lib-view"

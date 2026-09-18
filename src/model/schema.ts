@@ -34,6 +34,7 @@ export function validateProject(value: unknown): Project {
   if (!Array.isArray(value.fonts)) value.fonts = [];
   if (!Array.isArray(value.boxes)) value.boxes = [];
   if (!Array.isArray(value.shots)) value.shots = [];
+  if (!Array.isArray(value.studios)) value.studios = [];
   if (!Array.isArray(value.rulebooks)) value.rulebooks = [];
   if (!Array.isArray(value.pieceSpecs)) value.pieceSpecs = [];
   if (!Array.isArray(value.boards)) value.boards = [];

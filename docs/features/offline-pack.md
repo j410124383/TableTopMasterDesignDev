@@ -34,7 +34,9 @@
 
 Windows 文件名 **不要改**（已有人按 `TMD-offline.zip` 下）。Mac 用带 `-mac` 的名字，避免把 Windows 包误发给苹果电脑。
 
-包内都带对应系统的 Node.js（版本与现网 Windows 包同一档，当前 22.x），对方 **不用** 去 nodejs.org、**不用 VPN**。第一次启动若还没有 `node_modules`，脚本用国内镜像 `npm install`。
+包内都带对应系统的 Node.js（版本与现网 Windows 包同一档，当前 22.x），对方 **不用** 去 nodejs.org、**不用 VPN**。
+
+**发版包必须预构建**：`npm run pack` 时先 `vite build`，把 `dist/` 和运行 `vite preview` 所需的 `node_modules` 打进 zip。使用者第一次启动 **禁止**再 `npm install`，也 **禁止**再现场用 Vite 编译源码。zip 会比「源码 + 第一次安装」更大，换的是双击就能开（见 [desktop-app.md](./desktop-app.md) 启动便捷性）。
 
 两包源码与版本号相同。联机仍要求两边 **同一版本 zip**；Windows 与 Mac 互开房可以，只要版本/协议一致。
 
@@ -53,7 +55,9 @@ Windows 文件名 **不要改**（已有人按 `TMD-offline.zip` 下）。Mac �
 
 1. 下载对应系统的 zip
 2. 解压成真正的文件夹（不要只在压缩包里双击）
-3. Windows：双击 **`TMD.exe`**，出现 TMD 窗口（不是系统浏览器）；关掉窗口即结束。Mac：双击 `打开卡牌工坊.command`，不要关终端。浏览器打开 `http://localhost:1420/`。Mac 请用 **Chrome 或 Edge**，不要用 Safari。
+3. Windows：双击 **`TMD.exe`**，出现 TMD 窗口（不是系统浏览器）；关掉窗口即结束。Mac：双击 `打开卡牌工坊.command`，不要关终端。Mac 窗口仍加载本机 1420；请用 **Chrome 或 Edge** 仅当没有窗口壳时。不要在压缩包里直接开。
+
+不要再写「第一次会自动 npm install」——发版包应已带好 `dist/` 与依赖，双击即可。
 
 Mac 额外一句（可放步骤旁或包内 `使用说明.txt`）：若系统提示无法打开未识别的开发者，**右键 → 打开**；若双击没反应，打开「终端」进入解压目录执行 `chmod +x 打开卡牌工坊.command` 后再双击。
 
@@ -70,6 +74,8 @@ npm run pack
 ```
 
 一次打出 Windows + Mac 两份 zip。允许内置 Node 按需下载（Windows zip 与 macOS tarball 各一份，缓存在 `vendor/`，互不覆盖）。
+
+pack **必须**：先构建 `dist/`（`npm run build` 或等价），再把 `dist/`、运行 preview 用的 `node_modules`、`TMD.exe`（Windows）、内置 Node 打进暂存目录。缺 `dist/index.html` 则失败，不要打出「解压后还要编译」的包。
 
 不必单独再跑 `pack:mac`；若实现成分命令，`pack` 仍须打齐两份。
 
@@ -126,7 +132,8 @@ gh release create v0.3.24 --repo j410124383/TableTopMasterDesignDev --title "桌
 - 切到脚本所在目录（解压后的工坊根）
 - 使用包内 macOS Node，**不要**依赖系统全局 Node
 - 启动前对脚本自身和内置 `node` 做 `chmod +x`（Windows 打的 zip 经常丢掉 Unix 可执行位）
-- 无 `node_modules` 时：`npm install --registry=https://registry.npmmirror.com`
+- 无 `node_modules` 时：仅 **开发机 / 未打 dist 的源码树** 才 `npm install --registry=https://registry.npmmirror.com`。发版 zip 已带依赖时 **不要**再装
+- 有 `dist/index.html` 时用 preview 起 1420，不要 `npm run start` / Vite 开发服务
 - 打印本机与局域网地址（与 Windows 黑窗口同一套信息，防火墙那行 Windows 专用命令可改成 macOS 提示或省略）
 - `npm run start`，并用 `open http://localhost:1420/` 打开默认浏览器
 - 终端保持开着；关掉即停服务
@@ -136,7 +143,8 @@ gh release create v0.3.24 --repo j410124383/TableTopMasterDesignDev --title "桌
 ## 验收标准
 
 - [ ] `npm run pack` 在 Windows 上生成 `release/TMD-offline.zip` 与 `release/TMD-offline-mac.zip`，并复制到 `public/`
-- [ ] Windows 包仍含 `打开卡牌工坊.bat` + Windows `node.exe`，行为与现在一致
+- [ ] 包内含已构建的 `dist/index.html`；解压后双击即可，不再第一次 `npm install`、不再 Vite 开发编译
+- [ ] Windows 包仍含 `打开卡牌工坊.bat` + Windows `node.exe`，有 `TMD.exe` 时以窗口为准
 - [ ] Mac 包含 `打开卡牌工坊.command` + macOS `darwin-arm64` 的 Node，**不含** `node.exe`
 - [ ] Mac 包可在 Apple 芯片 Mac 上解压后启动，浏览器打开 `http://localhost:1420/`，不必预先安装 Node
 - [ ] 落地页与首页能分别下载两份；缺文件的按钮禁用并说明原因
@@ -159,3 +167,4 @@ gh release create v0.3.24 --repo j410124383/TableTopMasterDesignDev --title "桌
 |------|------|
 | 2026-09-10 | 新增 Mac（Apple 芯片）离线 zip；Windows 上一次 pack 打出两份 |
 | 2026-09-16 | 对外发版：同一仓库 GitHub Releases 挂 zip，不另开仓、zip 不进 git |
+| 2026-09-16 | 发版预构建 dist + preview；禁止使用者第一次 npm install |

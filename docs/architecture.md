@@ -11,11 +11,11 @@
 | 卡牌渲染 | Canvas 2D API | `src/render/drawCard.ts` 离屏绘制，用于预览/导出/对战缩略图 |
 | 状态 | Zustand | 见下方 Store 分工 |
 | 构建 | Vite 7 | 开发端口 1420 |
-| 桌面壳 | Tauri 2 + 现有 Node 本地服务 | 日常用 TMD **窗口**，不经系统浏览器。见 [desktop-app.md](./features/desktop-app.md) |
+| 桌面壳 | WebView2 C# `TMD.exe` + Node sidecar | 日常窗口。发版预构建 `vite preview`。Tauri 脚本仍在但不作日常入口。见 [desktop-app.md](./features/desktop-app.md) |
 | 联机 | PeerJS | WebRTC 点对点，辅以房间 API |
-| 导出 | pdf-lib、Canvas / pngjs | PDF 拼版；PNG / JPG 光栅（页图或单卡） |
+| 导出 | pdf-lib、Canvas / pngjs；场景 ASCII FBX | PDF 拼版；PNG / JPG 光栅；产品/影棚网格导出给 Maya |
 | PSD | ag-psd | 导入 Photoshop 图层 |
-| 包装盒 3D | WebGL | 方盒预览、UV 壳、产品渲染静帧；后期转台序列帧 |
+| 包装盒 3D | WebGL | 方盒预览、UV 壳、产品渲染静帧、影棚序列（同一套 BoxGl） |
 
 ## 产品信息架构（已确认）
 
@@ -29,11 +29,11 @@
 └── 说明书         规则书（编辑器细节待补）
 ```
 
-项目级：变量、媒体、舞台（试玩）、**产品渲染**（场景库预览块 → 内部编辑）、打印、设置。打印主要服务卡牌；产品渲染出宣传/实物静帧（含板件、盒）。
+项目级：变量、媒体、舞台（试玩）、**产品渲染**（场景库预览块 → 内部编辑，静帧 / 导出 FBX）、**影棚**（影棚库预览块 → 模版镜头，序列帧 / 当前帧 FBX）、打印、设置。打印主要服务卡牌；产品渲染出宣传/实物静帧，并可把场景交给 Maya；影棚出宣传镜头 PNG 序列。
 
 ## 路由与页面地图
 
-> 下列为当前代码路由。
+> 下列以产品规格为准。`studio` 已写入规格、代码待同步；其余为当前代码路由。
 
 ```
 /                 LandingPage       落地页、下载
@@ -46,7 +46,8 @@
   sets            SetsPage          数据集浏览
   deck            DeckPage          卡组表格
   box             BoxPage           包装盒：结构 / 贴图 / 渲染
-  shot            ProductShotPage   产品渲染：场景库 → 内部编辑（卡/板/盒同场景）
+  shot            ProductShotPage   产品渲染：场景库 → 内部编辑（卡/板/盒同场景，静帧）
+  studio          StudioPage        影棚：库 → 模版+演员+操作机/渲染机+序列（不要用 stage，那是对战舞台）
   manual          ManualPage        说明书占位
   vars            VarsPage          项目变量
   media           MediaPage         媒体库
@@ -69,6 +70,8 @@ src/
 ├── lib/          工具（颜色、mm、zip、字体、PSD 等）
 └── ui/           通用 UI 组件
 ```
+
+**片区所有权、必须复用的轮子、改 X 动哪几份文件** 见 [handbook.md](./handbook.md)。产品渲染里的包装盒只调用 `boxDraw` / `BoxGl`，禁止再写一套 tray / shader。
 
 ## 状态管理分工
 
@@ -133,6 +136,7 @@ flowchart TD
    - `data/boards/` — 板件（贴图扣形件）
    - `assets/` — 图片、字体等二进制
    - `.ceditor` — 格式标记
+   - 产物（不进 JSON）：`渲染图/`、`序列帧/`、`导出模型/`
 
 ### Tauri / Node 扩展
 
@@ -161,7 +165,7 @@ flowchart TD
 
 ## 离线包与桌面窗口
 
-日常运行见 [desktop-app.md](./features/desktop-app.md)：TMD 窗口加载本机服务，**不再打开系统浏览器**。
+日常运行见 [desktop-app.md](./features/desktop-app.md)：TMD 窗口加载本机服务，**不再打开系统浏览器**。发给使用者的包在 **打包时 `vite build`**，运行时 sidecar 为 **`vite preview`**（仍挂 `/__fs/` 等插件），不要在用户机器上跑 Vite 开发编译。开发机仍 `npm run dev`。启动体感见 desktop-app「启动便捷性」。
 
 `npm run pack`（`scripts/pack.mjs`）仍可打两份解压 zip（试用 / 尚无安装包时），复制到 `public/`：
 
@@ -181,7 +185,7 @@ npm run dev      # Vite 开发
 npm run start    # 0.0.0.0:1420（开发机可开浏览器）
 npm run desktop:exe  # 编出仓库根目录 TMD.exe
 npm run build    # tsc + vite build
-npm run pack     # Windows + Mac 离线 zip → release/ 与 public/
+npm run pack     # 先 build dist + TMD.exe，再打 Windows + Mac 离线 zip → release/ 与 public/
 npm run tauri    # 可选 Tauri；日常 Windows 窗口是 TMD.exe
 ```
 
@@ -192,6 +196,10 @@ npm run tauri    # 可选 Tauri；日常 Windows 窗口是 TMD.exe
 | 类型定义 | `src/model/types.ts` |
 | 校验 | `src/model/schema.ts` |
 | 蓝图↔模板同步 | `src/model/normalize.ts` |
-| 绘制 | `src/render/drawCard.ts` |
+| 卡面绘制 | `src/render/drawCard.ts` |
+| 包装网格 / 印刷 / 材质 | `src/features/box/boxGeom.ts` `boxDraw.ts` `boxGl.ts` |
+| 产品场景组合 | `src/features/shot/shotResolve.ts`（盒子走 boxDraw） |
+| 影棚 | `src/features/studio/`（模版+演员；布景复用 shotResolve；序列写盘） |
 | 存储 | `src/persist/storage.ts` |
 | 文件夹 IO | `src/persist/folderFormat.ts` |
+| 改代码怎么选文件 | [handbook.md](./handbook.md) |

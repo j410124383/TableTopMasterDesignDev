@@ -14,6 +14,28 @@ if [ ! -f "$NODE_BIN" ]; then
   exit 1
 fi
 
+if [ -f "$ROOT/dist/index.html" ]; then
+  echo
+  node "$ROOT/scripts/print-lan.mjs"
+  if [ -f "$ROOT/VERSION.txt" ]; then
+    echo
+    echo "版本文件：VERSION.txt"
+  fi
+  echo "不要关这个终端窗口。"
+  echo "请用 Chrome 或 Edge 打开，不要用 Safari。"
+  echo
+  (sleep 3; open "http://localhost:1420/") &
+  "$NODE_BIN" "$ROOT/node_modules/vite/bin/vite.js" preview --host 0.0.0.0 --port 1420 --strictPort
+  status=$?
+  if [ $status -ne 0 ]; then
+    echo
+    echo "启动失败。常见原因：1420 端口被占用，或离线包不完整。"
+    echo "可关掉其它终端后再试，或在 Chrome 打开 http://localhost:1420/"
+    read -r _
+  fi
+  exit $status
+fi
+
 if [ ! -d "$ROOT/node_modules" ]; then
   echo "第一次打开，正在安装依赖（国内镜像，不需要 VPN）…"
   npm install --registry=https://registry.npmmirror.com

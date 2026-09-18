@@ -41,15 +41,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if exist "%ROOT%dist\index.html" goto :have_deps
 if not exist "node_modules\" (
   echo 第一次打开，正在安装依赖（国内镜像，不需要 VPN）…
   call npm install --registry=https://registry.npmmirror.com
   if errorlevel 1 (
-    echo 安装失败。完整离线包应已带 node_modules；或检查网络后重试。
+    echo 安装失败。完整离线包应已带 dist 与 node_modules；或检查网络后重试。
     pause
     exit /b 1
   )
 )
+:have_deps
 
 if /i "%~1"=="/console" goto :console
 if exist "%ROOT%TMD.exe" (

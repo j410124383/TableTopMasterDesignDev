@@ -157,6 +157,7 @@ export function UvEditor({
   snap = true,
   textureFit = "cover",
   textureTileScale = 1,
+  textureRotationDeg = 0,
 }: {
   faces: Record<BoxFace, UvIsland>;
   textureUrl?: string | null;
@@ -167,6 +168,7 @@ export function UvEditor({
   snap?: boolean;
   textureFit?: TextureFitMode;
   textureTileScale?: number;
+  textureRotationDeg?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -178,6 +180,7 @@ export function UvEditor({
   const spaceRef = useRef(false);
   const guidesRef = useRef<Guide[]>([]);
   const [cursor, setCursor] = useState("default");
+  const [texNote, setTexNote] = useState<string | null>(textureUrl ? null : "先导入印刷图");
   const snapRef = useRef(snap);
   snapRef.current = snap;
   const selectedRef = useRef(selectedFace);
@@ -375,26 +378,36 @@ export function UvEditor({
   useEffect(() => {
     if (!textureUrl) {
       imgRef.current = null;
+      setTexNote("先导入印刷图");
       paint();
       return;
     }
     let dead = false;
+    setTexNote(null);
     void loadBoxTexture(textureUrl, projectDir)
       .then((img) => {
         if (dead) return;
-        imgRef.current = bakeTextureFit(img, textureFit, textureTileScale);
+        if (img.naturalWidth < 2) {
+          imgRef.current = null;
+          setTexNote("贴图为空");
+          paint();
+          return;
+        }
+        imgRef.current = bakeTextureFit(img, textureFit, textureTileScale, textureRotationDeg);
+        setTexNote(null);
         paint();
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!dead) {
           imgRef.current = null;
+          setTexNote(err instanceof Error ? err.message : "贴图加载失败");
           paint();
         }
       });
     return () => {
       dead = true;
     };
-  }, [textureUrl, projectDir, textureFit, textureTileScale]);
+  }, [textureUrl, projectDir, textureFit, textureTileScale, textureRotationDeg]);
 
   useEffect(() => {
     paint();
@@ -404,7 +417,7 @@ export function UvEditor({
     <div
       ref={wrapRef}
       className="uv-editor"
-      style={{ cursor }}
+      style={{ cursor, position: "relative" }}
       onPointerMove={(e) => {
         if (dragRef.current) return;
         const wrap = wrapRef.current;
@@ -558,6 +571,11 @@ export function UvEditor({
       }}
     >
       <canvas ref={canvasRef} />
+      {texNote ? (
+        <p className="muted" style={{ position: "absolute", left: 12, bottom: 12, margin: 0, pointerEvents: "none" }}>
+          {texNote}
+        </p>
+      ) : null}
     </div>
   );
 }

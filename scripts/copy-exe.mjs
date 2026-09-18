@@ -8,6 +8,14 @@ if (!existsSync(from)) {
   console.error("desktop/dist/TMD.exe 不存在。先运行 npm run desktop:exe");
   process.exit(1);
 }
-copyFileSync(from, join(root, "TMD.exe"));
 mkdirSync(join(root, "public"), { recursive: true });
-console.log("wrote TMD.exe");
+const dest = join(root, "TMD.exe");
+try {
+  copyFileSync(from, dest);
+  console.log("wrote TMD.exe");
+} catch (err) {
+  const alt = join(root, "TMD.exe.new");
+  copyFileSync(from, alt);
+  console.warn(`TMD.exe 正在运行，无法覆盖。已写到 TMD.exe.new。请关掉旧窗口后把 TMD.exe.new 改名为 TMD.exe。`);
+  console.warn(err instanceof Error ? err.message : err);
+}

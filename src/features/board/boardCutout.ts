@@ -150,13 +150,13 @@ export function probeBoardAlpha(img: HTMLImageElement | HTMLCanvasElement): { ha
   return { hasAlpha, w: data.width, h: data.height };
 }
 
-export function cutoutFromImage(img: HTMLImageElement | HTMLCanvasElement, board: BoardPiece): BoardCutout {
+export function cutoutFromImage(img: HTMLImageElement | HTMLCanvasElement, board: BoardPiece, contourMax = MAX_SIDE): BoardCutout {
   const data = imageToData(img);
   const imgW = Math.max(1, data.width);
   const imgH = Math.max(1, data.height);
   const { w: wMm, d: dMm } = boardPlaneMm(board, imgW, imgH);
   const tMm = boardThicknessMm(board);
-  const scale = Math.max(imgW, imgH) > MAX_SIDE ? MAX_SIDE / Math.max(imgW, imgH) : 1;
+  const scale = Math.max(imgW, imgH) > contourMax ? contourMax / Math.max(imgW, imgH) : 1;
   const gw = Math.max(8, Math.round(imgW * scale));
   const gh = Math.max(8, Math.round(imgH * scale));
   const { on, hasAlpha, rgb } = sampleGrid(data, gw, gh);
@@ -203,6 +203,7 @@ export async function loadBoardCutout(
   board: BoardPiece,
   src: string | undefined,
   projectDir?: string | null,
+  opts?: { contourMax?: number },
 ): Promise<{ cutout: BoardCutout; image: HTMLImageElement | HTMLCanvasElement | null }> {
   if (!src) {
     const { w, d } = boardPlaneMm(board, 1, 1);
@@ -230,5 +231,5 @@ export async function loadBoardCutout(
     };
   }
   const image = await loadBoxTexture(src, projectDir);
-  return { cutout: cutoutFromImage(image, board), image };
+  return { cutout: cutoutFromImage(image, board, opts?.contourMax ?? MAX_SIDE), image };
 }

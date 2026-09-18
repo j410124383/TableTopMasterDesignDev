@@ -8,6 +8,7 @@
 |------|------|
 | [vision.md](./vision.md) | 产品愿景、目标用户、核心场景 |
 | [architecture.md](./architecture.md) | 技术栈、模块地图、状态与持久化 |
+| [handbook.md](./handbook.md) | **程序手册**：片区边界、必须复用的轮子、改 X 动哪几份（给 Agent / 维护用） |
 | [data-model.md](./data-model.md) | Project / Blueprint / CardSet 等数据结构 |
 | [features/](./features/) | 各功能模块的交互规格与验收标准 |
 | [changelog.md](./changelog.md) | 文档变更与代码同步记录 |
@@ -24,9 +25,9 @@
 
 ### Agent 维护代码时
 
-1. 读相关 `docs/` 文件
+1. 读相关 `docs/` 文件，**先翻 [handbook.md](./handbook.md) 的片区与「改 X 动哪」**
 2. 列出与代码的差异
-3. 按最小 diff 实现
+3. 按最小 diff 实现（只动所属片区，复用现成轮子）
 4. 对照「验收标准」自检
 5. 把 changelog 中 `[待同步]` 改为 `[已同步 vX.Y.Z]`
 
@@ -49,7 +50,8 @@
 - [pieces.md](./features/pieces.md) — 卡牌（规格预览块、蓝图与数据集；纸厚与卡芯）
 - [boards.md](./features/boards.md) — 板件（与包装盒并列；贴图 alpha 扣形 + 厚度）
 - [packaging.md](./features/packaging.md) — 包装盒（方盒参数、一张贴图与铺法、棱倒角、每面 UV 壳、单盒渲染）
-- [product-render.md](./features/product-render.md) — 产品渲染（场景库、透视/等距、控制杆、布局模版、描边与滤镜）
+- [product-render.md](./features/product-render.md) — 产品渲染（场景库、透视/等距、控制杆、布局模版、描边与滤镜；静帧 PNG；导出 FBX 给 Maya）
+- [studio.md](./features/studio.md) — 影棚（宣传镜头：模版 + 演员槽 + 秒数；操作机/渲染机；可引用产品场景当布景；PNG 序列）
 - [rulebook.md](./features/rulebook.md) — 说明书
 
 卡牌内的现有能力：
@@ -60,9 +62,10 @@
 
 其它：
 
+- [handbook.md](./handbook.md) — 程序手册（片区、轮子、怎么改才快）
 - [play-mode.md](./features/play-mode.md) — 对战、联机、牌桌
 - [workspace-home.md](./features/workspace-home.md) — 首页、项目、工作区
 - [offline-pack.md](./features/offline-pack.md) — Windows / Mac 离线 zip（解压双击启动，内置 Node）；对外发版走 GitHub Releases
-- [desktop-app.md](./features/desktop-app.md) — 日常用 TMD 窗口，不经系统浏览器；为后期序列帧打底
+- [desktop-app.md](./features/desktop-app.md) — 日常用 TMD 窗口，不经系统浏览器；发版预构建、双击数秒内可点；影棚序列帧的宿主
 - [market-community.md](./features/market-community.md) — 市场、论坛、新闻
 - [ui-consistency.md](./features/ui-consistency.md) — 颜色、文件导入、次级界面等 UI 约定

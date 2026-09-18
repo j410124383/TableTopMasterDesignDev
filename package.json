@@ -1,7 +1,7 @@
 {
   "name": "card-editor",
   "private": true,
-  "version": "0.3.24",
+  "version": "0.3.41",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "desktop:exe": "dotnet publish desktop/TMD.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o desktop/dist && node scripts/copy-exe.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "serve": "vite preview --host --port 1420",
+    "serve": "vite preview --host 0.0.0.0 --port 1420 --strictPort",
     "pack": "node scripts/pack.mjs",
     "import-ankh": "node scripts/import-ankh.mjs",
     "tauri": "tauri"

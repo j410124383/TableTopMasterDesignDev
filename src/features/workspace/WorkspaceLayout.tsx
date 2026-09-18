@@ -25,6 +25,7 @@ import {
   IconRedo,
   IconSave,
   IconShot,
+  IconStudio,
   IconSpec,
   IconUndo,
   IconVars,
@@ -251,6 +252,7 @@ export function WorkspaceLayout() {
   const packing = location.pathname.startsWith("/project/box");
   const boarding = location.pathname.startsWith("/project/board");
   const shooting = location.pathname.startsWith("/project/shot");
+  const studioing = location.pathname.startsWith("/project/studio");
   const manual = location.pathname.startsWith("/project/manual");
 
   return (
@@ -316,6 +318,10 @@ export function WorkspaceLayout() {
           <NavLink to="/project/shot" className={() => `tab ${shooting ? "active" : ""}`} title={t("ws.shot")}>
             <span className="tab-ico"><IconShot size={15} /></span>
             <span className="tab-lbl">{t("ws.shot")}</span>
+          </NavLink>
+          <NavLink to="/project/studio" className={() => `tab ${studioing ? "active" : ""}`} title={t("ws.studio")}>
+            <span className="tab-ico"><IconStudio size={15} /></span>
+            <span className="tab-lbl">{t("ws.studio")}</span>
           </NavLink>
           <NavLink to="/project/print" className={({ isActive }) => `tab ${isActive ? "active" : ""}`} title={t("ws.print")}>
             <span className="tab-ico"><IconPrint size={15} /></span>

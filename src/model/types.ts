@@ -221,6 +221,7 @@ export type Project = {
   boards?: BoardPiece[];
   boxes?: PackagingBox[];
   shots?: ProductShot[];
+  studios?: Studio[];
   rulebooks?: Rulebook[];
   assets: Record<string, string>;
   variables: ProjectVariable[];
@@ -278,9 +279,45 @@ export type BoxRenderSetup = {
   cullOutsideBox?: boolean;
   resolutionW?: number;
   resolutionH?: number;
+  /** 点渲染时的贴图档。缺省 max。视口不读。 */
+  exportTexture?: "standard" | "max";
 };
 
 export type TextureFit = "original" | "cover" | "tile";
+
+export type BoxMode = "simple" | "lidBase";
+export type BoxSleeve = "upDown" | "frontBack" | "leftRight";
+
+export type TextureRotationDeg = 0 | 90 | 180 | 270;
+
+export type BoxPartMaps = {
+  textureAssetId?: string;
+  textureFit?: TextureFit;
+  textureTileScale?: number;
+  /** 印刷图在 UV 0–1 里顺时针转；缺省 0。不改壳坐标。 */
+  textureRotationDeg?: TextureRotationDeg;
+  faces: Record<BoxFace, UvIsland>;
+  innerTextureAssetId?: string;
+  innerTextureFit?: TextureFit;
+  innerTextureTileScale?: number;
+  innerTextureRotationDeg?: TextureRotationDeg;
+  innerFaces?: Record<BoxFace, UvIsland>;
+  foilMaskAssetId?: string;
+  varnishMaskAssetId?: string;
+};
+
+export type BoxMaterial = {
+  baseColor?: string;
+  metallic?: number;
+  roughness?: number;
+  foilColor?: string;
+  foilMetallic?: number;
+  foilRoughness?: number;
+  foilGrain?: number;
+  foilGrainStyle?: "cell" | "frost";
+  varnishRoughness?: number;
+  varnishCoat?: number;
+};
 
 export type PackagingBox = {
   id: string;
@@ -288,13 +325,35 @@ export type PackagingBox = {
   lengthMm: number;
   widthMm: number;
   heightMm: number;
+  mode?: BoxMode;
+  lidHeightMm?: number;
+  baseHeightMm?: number;
+  wallMm?: number;
+  lidFitMm?: number;
+  /** 仅 lidBase。缺省 upDown：地口上/天口下 */
+  sleeve?: BoxSleeve;
+  /** 0 合盖，1 打开。仅 lidBase */
+  lidOpen?: number;
+  /** 仅 lidBase。天盒开口圈「上下」那一对壁口沿居中半圆。缺省 false */
+  lidNotchUpDown?: boolean;
+  /** 仅 lidBase。天盒开口圈「左右」那一对壁口沿居中半圆。缺省 false */
+  lidNotchLeftRight?: boolean;
+  /** 仅 lidBase。半圆半径 mm，缺省 10 */
+  lidNotchRadiusMm?: number;
+  material?: BoxMaterial;
   textureAssetId?: string;
   /** 贴图占满 UV 0–1。缺省 cover */
   textureFit?: TextureFit;
   textureTileScale?: number;
+  /** simple：印刷图顺时针转；缺省 0 */
+  textureRotationDeg?: TextureRotationDeg;
+  foilMaskAssetId?: string;
+  varnishMaskAssetId?: string;
   /** 棱边倒角 mm，缺省 0 */
   bevelMm?: number;
   faces: Record<BoxFace, UvIsland>;
+  lid?: BoxPartMaps;
+  base?: BoxPartMaps;
   render?: BoxRenderSetup;
 };
 
@@ -311,6 +370,8 @@ export type ProductShotItem = {
   rotationDeg: { x: number; y: number; z: number };
   scale?: number;
   slotId?: string;
+  /** 仅 kind=box 且详细天地盖。0 合上～1 打开。缺省跟随包装盒 */
+  lidOpen?: number;
   /** 仅 kind=stack。缺省 = 满集 + 牌组形态 */
   stack?: ShotStackLook;
 };
@@ -364,6 +425,56 @@ export type ProductShot = {
   render: BoxRenderSetup;
   look?: ProductShotLook;
   layoutId?: string;
+};
+
+export type StudioTemplateId = "unbox-turntable" | "box-turntable" | "card-spread" | "card-batch";
+
+export type StudioOrbitCamera = {
+  yaw: number;
+  pitch: number;
+  distance: number;
+  fov: number;
+  target?: { x: number; y: number; z: number };
+  projection?: "perspective" | "isometric";
+};
+
+export type StudioActor = {
+  slotId: "box" | "stack";
+  kind: "box" | "stack";
+  refId: string;
+  lidOpen?: number;
+  face?: "front" | "back";
+  stack?: ShotStackLook;
+};
+
+export type StudioBackdrop = {
+  kind?: "none" | "color" | "shot";
+  color?: string;
+  shotId?: string;
+};
+
+export type StudioParams = {
+  unboxSeconds?: number;
+  turnSeconds?: number;
+  turns?: number;
+  overlapUnboxTurn?: boolean;
+  spreadSeconds?: number;
+  batchSize?: number;
+  batchGapSeconds?: number;
+  lightsFollowTurn?: boolean;
+};
+
+export type Studio = {
+  id: string;
+  name: string;
+  templateId: StudioTemplateId;
+  actors: StudioActor[];
+  backdrop?: StudioBackdrop;
+  params?: StudioParams;
+  render: BoxRenderSetup;
+  viewCamera?: StudioOrbitCamera;
+  lookThrough?: "view" | "render";
+  fps?: number;
 };
 
 export type Rulebook = {

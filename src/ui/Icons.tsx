@@ -241,6 +241,12 @@ export const IconShot = (p: IconProps) => (
     <circle cx="12" cy="14" r="3.2" />
   </Svg>
 );
+export const IconStudio = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="8" width="18" height="12" rx="1.5" />
+    <path d="M7 8V5l3 2 3-2 3 2 3-2v3" />
+  </Svg>
+);
 export const IconGear = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="3" />

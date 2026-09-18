@@ -30,4 +30,4 @@ alwaysApply: true
 
 读 changelog `[待同步]` → 对照 feature → 列出差异 → 最小 diff → 对照验收标准 → 改为 `[已同步 vX.Y.Z]`
 
-入口：`docs/README.md`、`AGENTS.md`
+入口：`docs/README.md`、`docs/handbook.md`、`AGENTS.md`

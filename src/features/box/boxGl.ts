@@ -30,8 +30,11 @@ uniform mat4 uMVP;
 uniform mat4 uModel;
 varying vec2 vUv;
 varying vec3 vNrm;
+varying vec3 vWorld;
 varying float vUseTex;
 void main() {
+  vec4 wp = uModel * vec4(aPos, 1.0);
+  vWorld = wp.xyz;
   gl_Position = uMVP * vec4(aPos, 1.0);
   vUv = aUv;
   vNrm = mat3(uModel) * aNrm;
@@ -43,6 +46,7 @@ const FS = `
 precision mediump float;
 varying vec2 vUv;
 varying vec3 vNrm;
+varying vec3 vWorld;
 varying float vUseTex;
 uniform sampler2D uTex;
 uniform sampler2D uTexBack;
@@ -54,18 +58,86 @@ uniform float uKey;
 uniform float uFill;
 uniform float uAmbient;
 uniform vec3 uTint;
+uniform vec3 uBaseColor;
+uniform vec3 uFoilColor;
+uniform vec3 uEyeDir;
+uniform vec3 uEyePos;
+uniform float uMetallic;
+uniform float uRoughness;
+uniform float uHasFoil;
+uniform float uHasVarnish;
+uniform float uCoverBase;
+uniform float uFoilMetallic;
+uniform float uFoilRoughness;
+uniform float uFoilGrain;
+uniform float uFoilCell;
+uniform float uVarnishRoughness;
+uniform float uVarnishCoat;
+uniform sampler2D uFoil;
+uniform sampler2D uVarnish;
 void main() {
   vec3 n = normalize(vNrm);
   if (!gl_FrontFacing) n = -n;
-  float ndl = abs(dot(n, normalize(uLightDir)));
+  vec3 l = normalize(uLightDir);
+  vec3 toEye = uEyePos - vWorld;
+  vec3 v = dot(toEye, toEye) > 1.0 ? normalize(toEye) : normalize(uEyeDir);
+  vec3 h = normalize(l + v);
+  float ndl = max(dot(n, l), 0.0);
   vec4 texc = vUseTex > 1.5 ? texture2D(uTexBack, vUv) : texture2D(uTex, vUv);
   float has = vUseTex > 1.5 ? uHasBackTex : uHasTex;
-  if (vUseTex > 0.5 && has > 0.5 && texc.a < 0.08) discard;
-  float useRgb = has * step(0.5, vUseTex) * step(0.01, uKey + uFill);
-  vec4 albedo = mix(vec4(uTint, 1.0), vec4(texc.rgb, 1.0), useRgb);
-  vec3 base = albedo.rgb;
-  vec3 lit = base * uAmbient + base * ndl * uKey * uLightColor + base * uFill;
-  gl_FragColor = vec4(lit, albedo.a);
+  float useRgb = has * step(0.5, vUseTex);
+  vec3 paper = uBaseColor * uTint;
+  vec3 albedo;
+  if (uCoverBase > 0.5) {
+    albedo = mix(paper, texc.rgb, useRgb * texc.a);
+  } else {
+    if (vUseTex > 0.5 && has > 0.5 && texc.a < 0.08) discard;
+    albedo = mix(paper, texc.rgb * uBaseColor, useRgb);
+  }
+  float foilM = 0.0;
+  float varnishM = 0.0;
+  if (uHasFoil > 0.5) {
+    vec4 f = texture2D(uFoil, vUv);
+    foilM = max(f.r, max(f.g, f.b)) * f.a;
+  }
+  if (uHasVarnish > 0.5) {
+    vec4 g = texture2D(uVarnish, vUv);
+    varnishM = max(g.r, max(g.g, g.b)) * g.a;
+  }
+  float cellG = fract(sin(dot(floor(vUv * mix(48.0, 260.0, uFoilGrain)), vec2(12.9898, 78.233))) * 43758.5453);
+  float n1 = fract(sin(dot(vUv * mix(70.0, 380.0, uFoilGrain), vec2(12.9898, 78.233))) * 43758.5453);
+  float n2 = fract(sin(dot(vUv * mix(190.0, 980.0, uFoilGrain), vec2(39.346, 11.135))) * 23421.631);
+  float frostG = n1 * 0.55 + n2 * 0.45;
+  float grain = mix(frostG, mix(cellG, n1, 0.4), clamp(uFoilCell, 0.0, 1.0));
+  albedo = mix(albedo, uFoilColor * mix(1.0, 0.72 + 0.4 * grain, uFoilGrain), foilM);
+  float metallic = mix(uMetallic, uFoilMetallic, foilM);
+  float roughness = mix(uRoughness, uVarnishRoughness, varnishM);
+  roughness = mix(roughness, mix(uFoilRoughness, uFoilRoughness + 0.22 * grain, uFoilGrain), foilM);
+  roughness = clamp(roughness, 0.002, 1.0);
+  vec3 diff = albedo * (1.0 - metallic);
+  vec3 specCol = mix(vec3(0.04), albedo, metallic);
+  float specPow = mix(16.0, 520.0, 1.0 - roughness);
+  float spec = pow(max(dot(n, h), 0.0), specPow);
+  spec *= mix(1.0, 0.45 + 0.7 * grain, foilM * uFoilGrain);
+  float nv = clamp(dot(n, v), 0.0, 1.0);
+  float fres = 0.08 + 0.92 * pow(1.0 - nv, 3.0);
+  float hemi = n.y * 0.5 + 0.5;
+  vec3 env = mix(vec3(0.16, 0.14, 0.12), vec3(0.82, 0.84, 0.88), hemi);
+  vec3 lit = diff * uAmbient + diff * ndl * uKey * uLightColor + diff * uFill;
+  lit += specCol * spec * (0.4 + 0.75 * (1.0 - roughness)) * uKey * uLightColor;
+  lit += specCol * env * metallic * (0.32 + 0.55 * fres);
+  lit += foilM * uFoilColor * (0.18 + 0.22 * hemi);
+  float coatAmt = varnishM * uVarnishCoat;
+  float glossV = clamp(1.0 - uVarnishRoughness, 0.0, 1.0);
+  vec3 r = reflect(-v, n);
+  float hemiR = r.y * 0.5 + 0.5;
+  vec3 sky = mix(vec3(0.11, 0.10, 0.09), vec3(0.93, 0.95, 0.99), hemiR);
+  sky += vec3(1.0, 0.98, 0.94) * pow(max(dot(r, l), 0.0), 36.0) * (1.4 + 1.2 * uKey);
+  lit = mix(lit, mix(lit, sky, 0.35 + 0.55 * glossV), varnishM * min(1.0, 0.22 + 0.28 * uVarnishCoat) * fres);
+  lit += sky * fres * coatAmt * (0.65 + 1.35 * glossV);
+  float vPow = mix(28.0, 420.0, glossV);
+  lit += vec3(0.95, 0.98, 1.0) * coatAmt * pow(max(dot(n, h), 0.0), vPow) * (0.5 + 1.5 * fres);
+  gl_FragColor = vec4(lit, 1.0);
 }
 `;
 
@@ -132,6 +204,7 @@ function checkerTexture(gl: WebGLRenderingContext) {
 
 export type BoxViewOpts = {
   selectedFace?: BoxFace | null;
+  outlineItemId?: string | null;
   showFloor?: boolean;
   transparentBg?: boolean;
   background?: string;
@@ -148,6 +221,7 @@ export type BoxViewOpts = {
     projection?: "perspective" | "isometric";
     selected?: boolean;
   }[];
+  pathLines?: { a: [number, number, number]; b: [number, number, number]; rgb?: [number, number, number] }[];
 };
 
 export type SceneDrawItem = {
@@ -155,9 +229,24 @@ export type SceneDrawItem = {
   mesh: BoxMesh;
   image: HTMLImageElement | HTMLCanvasElement | null;
   backImage?: HTMLImageElement | HTMLCanvasElement | null;
+  foilImage?: HTMLImageElement | HTMLCanvasElement | null;
+  varnishImage?: HTMLImageElement | HTMLCanvasElement | null;
   model: Mat4;
   selected?: boolean;
   tint?: [number, number, number];
+  look?: {
+    baseColor: [number, number, number];
+    metallic: number;
+    roughness: number;
+    foilColor: [number, number, number];
+    foilMetallic?: number;
+    foilRoughness?: number;
+    foilGrain?: number;
+    foilCell?: number;
+    varnishRoughness?: number;
+    varnishCoat?: number;
+  };
+  coverBase?: boolean;
 };
 
 export class BoxGl {
@@ -222,6 +311,23 @@ export class BoxGl {
       uFill: gl.getUniformLocation(prog, "uFill"),
       uAmbient: gl.getUniformLocation(prog, "uAmbient"),
       uTint: gl.getUniformLocation(prog, "uTint"),
+      uBaseColor: gl.getUniformLocation(prog, "uBaseColor"),
+      uFoilColor: gl.getUniformLocation(prog, "uFoilColor"),
+      uEyeDir: gl.getUniformLocation(prog, "uEyeDir"),
+      uEyePos: gl.getUniformLocation(prog, "uEyePos"),
+      uMetallic: gl.getUniformLocation(prog, "uMetallic"),
+      uRoughness: gl.getUniformLocation(prog, "uRoughness"),
+      uHasFoil: gl.getUniformLocation(prog, "uHasFoil"),
+      uHasVarnish: gl.getUniformLocation(prog, "uHasVarnish"),
+      uCoverBase: gl.getUniformLocation(prog, "uCoverBase"),
+      uFoilMetallic: gl.getUniformLocation(prog, "uFoilMetallic"),
+      uFoilRoughness: gl.getUniformLocation(prog, "uFoilRoughness"),
+      uFoilGrain: gl.getUniformLocation(prog, "uFoilGrain"),
+      uFoilCell: gl.getUniformLocation(prog, "uFoilCell"),
+      uVarnishRoughness: gl.getUniformLocation(prog, "uVarnishRoughness"),
+      uVarnishCoat: gl.getUniformLocation(prog, "uVarnishCoat"),
+      uFoil: gl.getUniformLocation(prog, "uFoil"),
+      uVarnish: gl.getUniformLocation(prog, "uVarnish"),
     };
     const lvs = compile(gl, gl.VERTEX_SHADER, LINE_VS);
     const lfs = compile(gl, gl.FRAGMENT_SHADER, LINE_FS);
@@ -352,6 +458,17 @@ export class BoxGl {
     gl.uniform1f(this.loc.uKey, key.intensity);
     gl.uniform1f(this.loc.uFill, setup.lights.fillIntensity ?? 0.25);
     gl.uniform1f(this.loc.uAmbient, setup.lights.ambient ?? 0.3);
+    const eyeDir: Vec3 = [eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]];
+    const elen = Math.hypot(eyeDir[0], eyeDir[1], eyeDir[2]) || 1;
+    gl.uniform3f(this.loc.uEyeDir, eyeDir[0] / elen, eyeDir[1] / elen, eyeDir[2] / elen);
+    gl.uniform3f(this.loc.uEyePos, eye[0], eye[1], eye[2]);
+    gl.uniform3f(this.loc.uBaseColor, 1, 1, 1);
+    gl.uniform3f(this.loc.uFoilColor, 0.83, 0.69, 0.22);
+    gl.uniform1f(this.loc.uMetallic, 0);
+    gl.uniform1f(this.loc.uRoughness, 0.55);
+    gl.uniform1f(this.loc.uHasFoil, 0);
+    gl.uniform1f(this.loc.uHasVarnish, 0);
+    gl.uniform1f(this.loc.uCoverBase, 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.hasTex && this.tex ? this.tex : this.checker);
     gl.uniform1i(this.loc.uTex, 0);
@@ -372,15 +489,15 @@ export class BoxGl {
     }
   }
 
-  private drawFaceOutline(face: BoxFace) {
-    if (!this.box) return;
-    const mesh = boxMesh(this.box);
+  private drawFaceOutline(face: BoxFace, mesh?: BoxMesh) {
+    const src = mesh ?? (this.box ? boxMesh(this.box) : null);
+    if (!src) return;
     const pos: number[] = [];
     const nrm: number[] = [];
-    for (let i = 0; i < mesh.faces.length; i++) {
-      if (mesh.faces[i] !== face) continue;
-      pos.push(mesh.pos[i * 3]!, mesh.pos[i * 3 + 1]!, mesh.pos[i * 3 + 2]!);
-      nrm.push(mesh.nrm[i * 3]!, mesh.nrm[i * 3 + 1]!, mesh.nrm[i * 3 + 2]!);
+    for (let i = 0; i < src.faces.length; i++) {
+      if (src.faces[i] !== face) continue;
+      pos.push(src.pos[i * 3]!, src.pos[i * 3 + 1]!, src.pos[i * 3 + 2]!);
+      nrm.push(src.nrm[i * 3]!, src.nrm[i * 3 + 1]!, src.nrm[i * 3 + 2]!);
     }
     if (!pos.length) return;
     const gl = this.gl;
@@ -398,7 +515,7 @@ export class BoxGl {
     gl.uniform1f(this.loc.uAmbient, 0.55);
     gl.drawArrays(gl.TRIANGLES, 0, pos.length / 3);
     gl.disable(gl.BLEND);
-    this.setMesh(this.box);
+    if (this.box) this.setMesh(this.box);
   }
 
   private drawGizmos(setup: BoxRenderSetup, vp: Mat4, opts: BoxViewOpts = {}) {
@@ -477,6 +594,10 @@ export class BoxGl {
           push(overlay, overlayCol, origin, ns[i]!, rgb);
         }
       }
+    }
+
+    for (const ln of opts.pathLines ?? []) {
+      push(overlay, overlayCol, ln.a, ln.b, ln.rgb ?? [1, 0.86, 0.28]);
     }
 
     const drawLines = (pos: number[], col: number[]) => {
@@ -640,7 +761,6 @@ export class BoxGl {
 
   drawScene(setup: BoxRenderSetup, items: SceneDrawItem[], opts: BoxViewOpts = {}) {
     this.setup = setup;
-    this.box = null;
     const gl = this.gl;
     const aspect = this.w / this.h;
     const cam = setup.camera;
@@ -653,6 +773,10 @@ export class BoxGl {
     const vp = matMul(proj, view);
     this.vp = vp;
     this.invVp = matInvert(vp);
+    if (items[0]) {
+      this.model = items[0].model;
+      this.mvp = matMul(vp, items[0].model);
+    }
     const transparent = opts.transparentBg || setup.cullBackground;
     const bg = parseColor(opts.background ?? setup.background ?? "#1c1c22");
     if (opts.silhouette) gl.clearColor(0, 0, 0, 1);
@@ -661,8 +785,7 @@ export class BoxGl {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
     gl.frontFace(gl.CCW);
-    gl.enable(gl.CULL_FACE);
-    gl.cullFace(gl.BACK);
+    gl.disable(gl.CULL_FACE);
     gl.useProgram(this.prog);
     const key = setup.lights.key;
     const ld = lightDir(key.yaw, key.pitch);
@@ -683,18 +806,53 @@ export class BoxGl {
     }
     gl.uniform1i(this.loc.uTex, 0);
     gl.uniform1i(this.loc.uTexBack, 1);
+    gl.uniform1i(this.loc.uFoil, 2);
+    gl.uniform1i(this.loc.uVarnish, 3);
+    const eyeDir: Vec3 = [eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]];
+    const el = Math.hypot(eyeDir[0], eyeDir[1], eyeDir[2]) || 1;
+    gl.uniform3f(this.loc.uEyeDir, eyeDir[0] / el, eyeDir[1] / el, eyeDir[2] / el);
+    gl.uniform3f(this.loc.uEyePos, eye[0], eye[1], eye[2]);
     for (const item of items) {
       this.uploadMesh(item.mesh);
       this.bindMeshAttribs();
       const hasFront = this.bindImage(item.image, 0);
       const hasBack = this.bindImage(item.backImage ?? null, 1);
+      const hasFoil = this.bindImage(item.foilImage ?? null, 2);
+      const hasVarnish = this.bindImage(item.varnishImage ?? null, 3);
       const mvp = matMul(vp, item.model);
       gl.uniformMatrix4fv(this.loc.uMVP, false, mvp);
       gl.uniformMatrix4fv(this.loc.uModel, false, item.model);
       gl.uniform1f(this.loc.uHasTex, hasFront ? 1 : 0);
       gl.uniform1f(this.loc.uHasBackTex, hasBack ? 1 : 0);
+      gl.uniform1f(this.loc.uHasFoil, hasFoil ? 1 : 0);
+      gl.uniform1f(this.loc.uHasVarnish, hasVarnish ? 1 : 0);
+      gl.uniform1f(this.loc.uCoverBase, item.coverBase ? 1 : 0);
+      const look = item.look;
+      if (look && !opts.silhouette) {
+        gl.uniform3f(this.loc.uBaseColor, look.baseColor[0], look.baseColor[1], look.baseColor[2]);
+        gl.uniform3f(this.loc.uFoilColor, look.foilColor[0], look.foilColor[1], look.foilColor[2]);
+        gl.uniform1f(this.loc.uMetallic, look.metallic);
+        gl.uniform1f(this.loc.uRoughness, look.roughness);
+        gl.uniform1f(this.loc.uFoilMetallic, look.foilMetallic ?? 0.95);
+        gl.uniform1f(this.loc.uFoilRoughness, look.foilRoughness ?? 0.12);
+        gl.uniform1f(this.loc.uFoilGrain, look.foilGrain ?? 0.55);
+        gl.uniform1f(this.loc.uFoilCell, look.foilCell ?? 1);
+        gl.uniform1f(this.loc.uVarnishRoughness, look.varnishRoughness ?? 0.02);
+        gl.uniform1f(this.loc.uVarnishCoat, look.varnishCoat ?? 1.5);
+      } else {
+        gl.uniform3f(this.loc.uBaseColor, 1, 1, 1);
+        gl.uniform3f(this.loc.uFoilColor, 0.83, 0.69, 0.22);
+        gl.uniform1f(this.loc.uMetallic, 0);
+        gl.uniform1f(this.loc.uRoughness, 0.55);
+        gl.uniform1f(this.loc.uFoilMetallic, 0.95);
+        gl.uniform1f(this.loc.uFoilRoughness, 0.12);
+        gl.uniform1f(this.loc.uFoilGrain, 0.55);
+        gl.uniform1f(this.loc.uFoilCell, 1);
+        gl.uniform1f(this.loc.uVarnishRoughness, 0.02);
+        gl.uniform1f(this.loc.uVarnishCoat, 1.5);
+      }
       if (item.tint && !opts.silhouette) gl.uniform3f(this.loc.uTint, item.tint[0], item.tint[1], item.tint[2]);
-      else if (!opts.silhouette) gl.uniform3f(this.loc.uTint, 0.78, 0.76, 0.72);
+      else if (!opts.silhouette) gl.uniform3f(this.loc.uTint, 1, 1, 1);
       gl.drawArrays(gl.TRIANGLES, 0, this.vCount);
       if (item.selected && !opts.silhouette) {
         gl.enable(gl.BLEND);
@@ -709,6 +867,18 @@ export class BoxGl {
         gl.uniform3f(this.loc.uTint, item.tint ? item.tint[0] : 0.78, item.tint ? item.tint[1] : 0.76, item.tint ? item.tint[2] : 0.72);
         gl.uniform1f(this.loc.uKey, key.intensity);
         gl.uniform1f(this.loc.uAmbient, setup.lights.ambient ?? 0.3);
+      }
+    }
+    if (opts.selectedFace && !opts.silhouette) {
+      const outline =
+        (opts.outlineItemId ? items.find((it) => it.id === opts.outlineItemId) : undefined) ?? items[0];
+      if (outline) {
+        this.uploadMesh(outline.mesh);
+        this.bindMeshAttribs();
+        const mvp = matMul(vp, outline.model);
+        gl.uniformMatrix4fv(this.loc.uMVP, false, mvp);
+        gl.uniformMatrix4fv(this.loc.uModel, false, outline.model);
+        this.drawFaceOutline(opts.selectedFace, outline.mesh);
       }
     }
     if (opts.gizmos !== false && !opts.silhouette) {
@@ -749,6 +919,50 @@ export class BoxGl {
       }
     }
     return hitId;
+  }
+
+  pickFace(cssX: number, cssY: number, items: SceneDrawItem[], preferId?: string | null): BoxFace | null {
+    if (!this.invVp) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const ndcX = (cssX / rect.width) * 2 - 1;
+    const ndcY = 1 - (cssY / rect.height) * 2;
+    const n = mulVec4(this.invVp, [ndcX, ndcY, -1, 1]);
+    const f = mulVec4(this.invVp, [ndcX, ndcY, 1, 1]);
+    const nw = n[3] || 1;
+    const fw = f[3] || 1;
+    const near: Vec3 = [n[0] / nw, n[1] / nw, n[2] / nw];
+    const far: Vec3 = [f[0] / fw, f[1] / fw, f[2] / fw];
+    const dir: Vec3 = [far[0] - near[0], far[1] - near[1], far[2] - near[2]];
+    const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+    dir[0] /= len;
+    dir[1] /= len;
+    dir[2] /= len;
+    let best = Infinity;
+    let hit: BoxFace | null = null;
+    const list = preferId ? items.filter((it) => it.id === preferId) : items;
+    for (const item of list) {
+      const invModel = matInvert(item.model);
+      if (!invModel) continue;
+      const o4 = mulVec4(invModel, [near[0], near[1], near[2], 1]);
+      const d4 = mulVec4(invModel, [near[0] + dir[0], near[1] + dir[1], near[2] + dir[2], 1]);
+      const origin: Vec3 = [o4[0], o4[1], o4[2]];
+      const localDir: Vec3 = [d4[0] - o4[0], d4[1] - o4[1], d4[2] - o4[2]];
+      const dl = Math.hypot(localDir[0], localDir[1], localDir[2]) || 1;
+      const ld: Vec3 = [localDir[0] / dl, localDir[1] / dl, localDir[2] / dl];
+      const mesh = item.mesh;
+      for (let i = 0; i < mesh.faces.length; i += 3) {
+        const i0 = i * 3;
+        const a: Vec3 = [mesh.pos[i0]!, mesh.pos[i0 + 1]!, mesh.pos[i0 + 2]!];
+        const b: Vec3 = [mesh.pos[i0 + 3]!, mesh.pos[i0 + 4]!, mesh.pos[i0 + 5]!];
+        const c: Vec3 = [mesh.pos[i0 + 6]!, mesh.pos[i0 + 7]!, mesh.pos[i0 + 8]!];
+        const t = rayHitMesh(origin, ld, { pos: new Float32Array([...a, ...b, ...c]) });
+        if (t != null && t < best && t > 0.001) {
+          best = t;
+          hit = mesh.faces[i]!;
+        }
+      }
+    }
+    return hit;
   }
 
   worldRay(cssX: number, cssY: number): { origin: Vec3; dir: Vec3 } | null {

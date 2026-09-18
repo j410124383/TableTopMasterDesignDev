@@ -1,5 +1,22 @@
+import {
+  BOX_FACES,
+  boxBaseHeight,
+  boxBevelMm,
+  boxLidHeight,
+  boxLidLiftVec,
+  boxLidNotchRadiusMm,
+  boxLidOpen,
+  boxPartInnerMm,
+  boxPartWorldMm,
+  boxSleeveOf,
+  lidNotchWalls,
+  sleeveOpenFace,
+  boxWallMm,
+  defaultUvNet,
+  islandVisual,
+  partMapsOf,
+} from "@/model/box";
 import type { BoxFace, PackagingBox, UvIsland } from "@/model/types";
-import { BOX_FACES, boxBevelMm, islandVisual } from "@/model/box";
 
 export type Vec3 = [number, number, number];
 
@@ -11,6 +28,7 @@ export type FaceCorner = {
   t: number;
 };
 
+/** 地盒外壁朝向改由盒坯 UV 网表达，不再在采样时隐式转 s/t。 */
 function uvAt(island: UvIsland, s: number, t: number): [number, number] {
   const vis = islandVisual(island);
   let x = (s - 0.5) * vis.w;
@@ -119,15 +137,258 @@ function addQuad(
   pos: number[],
   uv: number[],
   nrm: number[],
-  faceIndex: BoxFace[],
+  faces: BoxFace[],
   a: Vert,
   b: Vert,
   c: Vert,
   d: Vert,
   face: BoxFace,
 ) {
-  addTri(pos, uv, nrm, faceIndex, a, b, c, face);
-  addTri(pos, uv, nrm, faceIndex, a, c, d, face);
+  addTri(pos, uv, nrm, faces, a, b, c, face);
+  addTri(pos, uv, nrm, faces, a, c, d, face);
+}
+
+const NOTCH_SEGS = 24;
+
+function dimOf(L: number, W: number, H: number, axis: 0 | 1 | 2) {
+  return axis === 0 ? L : axis === 1 ? H : W;
+}
+
+function vAdd(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+function vSub(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+function vScale(a: Vec3, s: number): Vec3 {
+  return [a[0] * s, a[1] * s, a[2] * s];
+}
+function vLen(a: Vec3) {
+  return Math.hypot(a[0], a[1], a[2]) || 1;
+}
+function vNorm(a: Vec3): Vec3 {
+  const l = vLen(a);
+  return [a[0] / l, a[1] / l, a[2] / l];
+}
+
+function wallSpanAndDepth(wall: BoxFace, open: BoxFace, L: number, W: number, H: number) {
+  const openAx = openAxisSign(open).axis;
+  const wallAx = openAxisSign(wall).axis;
+  const spanAx = ([0, 1, 2] as const).find((a) => a !== openAx && a !== wallAx) ?? 0;
+  return { span: dimOf(L, W, H, spanAx), depth: dimOf(L, W, H, openAx) };
+}
+
+function clampNotchRadius(want: number, span: number, depth: number) {
+  const r = Math.min(Math.max(0, want), span / 2 - 0.45, depth * 0.9);
+  return r >= 0.5 ? r : 0;
+}
+
+function edgeWallFace(open: BoxFace, a: Vec3, b: Vec3, L: number, W: number, H: number): BoxFace {
+  const mx = (a[0] + b[0]) / 2;
+  const my = (a[1] + b[1]) / 2;
+  const mz = (a[2] + b[2]) / 2;
+  const { axis } = openAxisSign(open);
+  const hx = L / 2;
+  const hy = H / 2;
+  const hz = W / 2;
+  if (axis !== 0 && Math.abs(mx) > hx * 0.6) return mx > 0 ? "right" : "left";
+  if (axis !== 2 && Math.abs(mz) > hz * 0.6) return mz > 0 ? "front" : "back";
+  if (axis !== 1 && Math.abs(my) > hy * 0.6) return my > 0 ? "top" : "bottom";
+  if (Math.abs(mx) >= Math.abs(mz) && Math.abs(mx) >= Math.abs(my)) return mx >= 0 ? "right" : "left";
+  if (Math.abs(mz) >= Math.abs(my)) return mz >= 0 ? "front" : "back";
+  return my >= 0 ? "top" : "bottom";
+}
+
+function inwardOnWall(open: BoxFace): Vec3 {
+  const { axis, sign } = openAxisSign(open);
+  const v: Vec3 = [0, 0, 0];
+  v[axis] = (-sign) as 1 | -1;
+  return v;
+}
+
+function vertOnFace(face: BoxFace, p: Vec3, L: number, W: number, H: number, island: UvIsland, n: Vec3): Vert {
+  return {
+    pos: p,
+    uv: uvAt(island, ...stOnFace(face, p[0], p[1], p[2], L, W, H)),
+    nrm: n,
+  };
+}
+
+type NotchFrame = {
+  mid: Vec3;
+  along: Vec3;
+  inn: Vec3;
+  half: number;
+  depth: number;
+};
+
+function notchFrame(wall: BoxFace, open: BoxFace, L: number, W: number, H: number, island: UvIsland): NotchFrame | null {
+  const corners = faceCorners(wall, L, W, H, island);
+  const { axis: oAx, sign: oSign } = openAxisSign(open);
+  const openCoord = oSign * (dimOf(L, W, H, oAx) / 2);
+  const onOpen = (p: Vec3) => Math.abs(p[oAx] - openCoord) < 0.35;
+  const openIdx = [0, 1, 2, 3].filter((i) => onOpen(corners[i]!.pos));
+  if (openIdx.length !== 2) return null;
+  const a = corners[openIdx[0]!]!.pos;
+  const b = corners[openIdx[1]!]!.pos;
+  const along = vNorm(vSub(b, a));
+  const mid: Vec3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+  let inn = inwardOnWall(open);
+  inn = vSub(inn, vScale(along, dot(inn, along)));
+  inn = vNorm(inn);
+  const half = vLen(vSub(b, a)) / 2;
+  const depth = dimOf(L, W, H, oAx);
+  return { mid, along, inn, half, depth };
+}
+
+function atNotch(fr: NotchFrame, s: number, t: number): Vec3 {
+  return vAdd(fr.mid, vAdd(vScale(fr.along, s), vScale(fr.inn, t)));
+}
+
+function semicircleOnWall(fr: NotchFrame, r: number): Vec3[] {
+  const pts: Vec3[] = [];
+  for (let i = 0; i <= NOTCH_SEGS; i++) {
+    const ang = (Math.PI * i) / NOTCH_SEGS;
+    pts.push(atNotch(fr, -Math.cos(ang) * r, Math.sin(ang) * r));
+  }
+  return pts;
+}
+
+function pushWallQuad(
+  pos: number[],
+  uv: number[],
+  nrm: number[],
+  faces: BoxFace[],
+  wall: BoxFace,
+  L: number,
+  W: number,
+  H: number,
+  island: UvIsland,
+  fn: Vec3,
+  dx: number,
+  dy: number,
+  dz: number,
+  p0: Vec3,
+  p1: Vec3,
+  p2: Vec3,
+  p3: Vec3,
+) {
+  const V = (p: Vec3) => shiftVert(vertOnFace(wall, p, L, W, H, island, fn), dx, dy, dz);
+  addQuad(pos, uv, nrm, faces, V(p0), V(p1), V(p2), V(p3), wall);
+}
+
+/** 开口边挖半圆：直径贴口沿，弧在壁面上往封闭面；左右整条、弧顶到封闭边，不用对角扇形。 */
+function pushNotchedWall(
+  pos: number[],
+  uv: number[],
+  nrm: number[],
+  faces: BoxFace[],
+  wall: BoxFace,
+  open: BoxFace,
+  L: number,
+  W: number,
+  H: number,
+  island: UvIsland,
+  radius: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  flip: boolean,
+) {
+  const fr = notchFrame(wall, open, L, W, H, island);
+  const n = faceNormal(wall);
+  const fn = flip ? ([-n[0], -n[1], -n[2]] as Vec3) : n;
+  const put = (p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3) =>
+    pushWallQuad(pos, uv, nrm, faces, wall, L, W, H, island, fn, dx, dy, dz, p0, p1, p2, p3);
+  if (!fr) {
+    const c = faceCorners(wall, L, W, H, island);
+    put(c[0]!.pos, c[1]!.pos, c[2]!.pos, c[3]!.pos);
+    return;
+  }
+  const r = Math.min(radius, fr.half - 0.45, fr.depth * 0.9);
+  if (r < 0.5) {
+    put(atNotch(fr, -fr.half, 0), atNotch(fr, fr.half, 0), atNotch(fr, fr.half, fr.depth), atNotch(fr, -fr.half, fr.depth));
+    return;
+  }
+  put(atNotch(fr, -fr.half, 0), atNotch(fr, -r, 0), atNotch(fr, -r, fr.depth), atNotch(fr, -fr.half, fr.depth));
+  put(atNotch(fr, r, 0), atNotch(fr, fr.half, 0), atNotch(fr, fr.half, fr.depth), atNotch(fr, r, fr.depth));
+  const arc = semicircleOnWall(fr, r);
+  for (let i = 0; i < arc.length - 1; i++) {
+    const ang0 = (Math.PI * i) / NOTCH_SEGS;
+    const ang1 = (Math.PI * (i + 1)) / NOTCH_SEGS;
+    const s0 = -Math.cos(ang0) * r;
+    const s1 = -Math.cos(ang1) * r;
+    put(arc[i]!, arc[i + 1]!, atNotch(fr, s1, fr.depth), atNotch(fr, s0, fr.depth));
+  }
+}
+
+function shiftVert(v: Vert, dx: number, dy: number, dz: number): Vert {
+  return { ...v, pos: [v.pos[0] + dx, v.pos[1] + dy, v.pos[2] + dz] };
+}
+
+function pushOpenRim(
+  pos: number[],
+  uv: number[],
+  nrm: number[],
+  faces: BoxFace[],
+  L: number,
+  W: number,
+  H: number,
+  iL: number,
+  iW: number,
+  iH: number,
+  ox: number,
+  oy: number,
+  oz: number,
+  island: UvIsland,
+  open: BoxFace,
+  notch?: { walls: ReadonlySet<BoxFace>; radius: number },
+) {
+  const n = faceNormal(open);
+  const outer = faceCorners(open, L, W, H, island);
+  const inner = faceCorners(open, iL, iW, iH, island);
+  const innerShift: Vec3 = [ox, oy, oz];
+  const vertAt = (p: Vec3): Vert => ({
+    pos: p,
+    uv: uvAt(island, ...stOnFace(open, p[0], p[1], p[2], L, W, H)),
+    nrm: n,
+  });
+  const strip = (oa: Vec3, ob: Vec3, ib: Vec3, ia: Vec3) => {
+    addQuad(pos, uv, nrm, faces, vertAt(oa), vertAt(ob), vertAt(ib), vertAt(ia), open);
+  };
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    const oa = outer[i]!.pos;
+    const ob = outer[j]!.pos;
+    const ia = vAdd(inner[i]!.pos, innerShift);
+    const ib = vAdd(inner[j]!.pos, innerShift);
+    const wall = edgeWallFace(open, oa, ob, L, W, H);
+    const rWant = notch && notch.walls.has(wall) ? notch.radius : 0;
+    const fr = rWant > 0 ? notchFrame(wall, open, L, W, H, island) : null;
+    const r = fr ? Math.min(rWant, fr.half - 0.45, fr.depth * 0.9) : 0;
+    if (!fr || r < 0.5) {
+      strip(oa, ob, ib, ia);
+      continue;
+    }
+    const oArc = semicircleOnWall(fr, r);
+    const delta = vSub([(ia[0] + ib[0]) / 2, (ia[1] + ib[1]) / 2, (ia[2] + ib[2]) / 2], fr.mid);
+    const iArc = oArc.map((p) => vAdd(p, delta));
+    const leftO = atNotch(fr, -r, 0);
+    const rightO = atNotch(fr, r, 0);
+    const leftI = vAdd(leftO, delta);
+    const rightI = vAdd(rightO, delta);
+    const oaIsLeft = vLen(vSub(oa, leftO)) <= vLen(vSub(oa, rightO));
+    if (oaIsLeft) {
+      strip(oa, leftO, leftI, ia);
+      strip(rightO, ob, ib, rightI);
+    } else {
+      strip(oa, rightO, rightI, ia);
+      strip(leftO, ob, ib, leftI);
+    }
+    for (let s = 0; s < oArc.length - 1; s++) {
+      strip(oArc[s]!, oArc[s + 1]!, iArc[s + 1]!, iArc[s]!);
+    }
+  }
 }
 
 function dominantFace(n: Vec3): BoxFace {
@@ -920,4 +1181,242 @@ export function lightDir(yawDeg: number, pitchDeg: number): Vec3 {
   const eye = orbitEye(yawDeg, pitchDeg, 1);
   const len = Math.hypot(eye[0], eye[1], eye[2]) || 1;
   return [eye[0] / len, eye[1] / len, eye[2] / len];
+}
+
+export function translateMesh(mesh: BoxMesh, dx: number, dy: number, dz: number): BoxMesh {
+  const pos = new Float32Array(mesh.pos);
+  for (let i = 0; i < pos.length; i += 3) {
+    pos[i] += dx;
+    pos[i + 1] += dy;
+    pos[i + 2] += dz;
+  }
+  return { ...mesh, pos };
+}
+
+function pushMesh(
+  pos: number[],
+  uv: number[],
+  nrm: number[],
+  faces: BoxFace[],
+  mesh: BoxMesh,
+  dx: number,
+  dy: number,
+  dz: number,
+  flip: boolean,
+  skip?: BoxFace | ReadonlySet<BoxFace>,
+) {
+  const skipSet = !skip ? null : typeof skip === "string" ? new Set<BoxFace>([skip]) : skip;
+  const n = mesh.pos.length / 3;
+  for (let i = 0; i < n; i += 3) {
+    if (skipSet && skipSet.has(mesh.faces[i]!)) continue;
+    const order = flip ? [i, i + 2, i + 1] : [i, i + 1, i + 2];
+    for (const vi of order) {
+      pos.push(mesh.pos[vi * 3]! + dx, mesh.pos[vi * 3 + 1]! + dy, mesh.pos[vi * 3 + 2]! + dz);
+      uv.push(mesh.uv[vi * 2]!, mesh.uv[vi * 2 + 1]!);
+      const s = flip ? -1 : 1;
+      nrm.push(s * mesh.nrm[vi * 3]!, s * mesh.nrm[vi * 3 + 1]!, s * mesh.nrm[vi * 3 + 2]!);
+      faces.push(mesh.faces[vi]!);
+    }
+  }
+}
+
+function openAxisSign(open: BoxFace): { axis: 0 | 1 | 2; sign: 1 | -1 } {
+  if (open === "right") return { axis: 0, sign: 1 };
+  if (open === "left") return { axis: 0, sign: -1 };
+  if (open === "top") return { axis: 1, sign: 1 };
+  if (open === "bottom") return { axis: 1, sign: -1 };
+  if (open === "front") return { axis: 2, sign: 1 };
+  return { axis: 2, sign: -1 };
+}
+
+function faceNormal(face: BoxFace): Vec3 {
+  if (face === "front") return [0, 0, 1];
+  if (face === "back") return [0, 0, -1];
+  if (face === "right") return [1, 0, 0];
+  if (face === "left") return [-1, 0, 0];
+  if (face === "top") return [0, 1, 0];
+  return [0, -1, 0];
+}
+
+/** 与 faceCorners 同一套 s/t：世界面宽为 U、面高为 V。 */
+function stOnFace(face: BoxFace, x: number, y: number, z: number, L: number, W: number, H: number): [number, number] {
+  const hx = L / 2;
+  const hy = H / 2;
+  const hz = W / 2;
+  if (face === "front") return [(x + hx) / Math.max(1, L), (y + hy) / Math.max(1, H)];
+  if (face === "back") return [(hx - x) / Math.max(1, L), (y + hy) / Math.max(1, H)];
+  if (face === "right") return [(hz - z) / Math.max(1, W), (y + hy) / Math.max(1, H)];
+  if (face === "left") return [(z + hz) / Math.max(1, W), (y + hy) / Math.max(1, H)];
+  if (face === "top") return [(x + hx) / Math.max(1, L), (hz - z) / Math.max(1, W)];
+  return [(x + hx) / Math.max(1, L), (z + hz) / Math.max(1, W)];
+}
+
+function clampTrayWall(wallMm: number, L: number, W: number, H: number, open: BoxFace) {
+  const { axis } = openAxisSign(open);
+  const depth = axis === 0 ? L : axis === 1 ? H : W;
+  const in1 = axis === 0 ? H : L;
+  const in2 = axis === 2 ? H : W;
+  return Math.min(wallMm, in1 / 2 - 0.4, in2 / 2 - 0.4, depth - 0.4);
+}
+
+function innerTraySize(L: number, W: number, H: number, wall: number, open: BoxFace) {
+  const { axis } = openAxisSign(open);
+  return {
+    iL: axis === 0 ? L - wall : L - 2 * wall,
+    iW: axis === 2 ? W - wall : W - 2 * wall,
+    iH: axis === 1 ? H - wall : H - 2 * wall,
+  };
+}
+
+function innerTrayOffset(wall: number, open: BoxFace): Vec3 {
+  const { axis, sign } = openAxisSign(open);
+  const o: Vec3 = [0, 0, 0];
+  o[axis] = sign * (wall / 2);
+  return o;
+}
+
+function trayLayerMeshes(
+  part: PackagingBox,
+  wallMm: number,
+  open: BoxFace,
+  innerFaces: Record<BoxFace, UvIsland>,
+  notchWalls: BoxFace[] = [],
+  notchRadius = 0,
+): { outer: BoxMesh; inner: BoxMesh | null } {
+  const L = Math.max(1, part.lengthMm);
+  const W = Math.max(1, part.widthMm);
+  const H = Math.max(1, part.heightMm);
+  const wall = clampTrayWall(wallMm, L, W, H, open);
+  if (wall < 0.25) return { outer: boxMesh(part), inner: null };
+  const { iL, iW, iH } = innerTraySize(L, W, H, wall, open);
+  if (iL < 1 || iW < 1 || iH < 1) return { outer: boxMesh(part), inner: null };
+  const [ox, oy, oz] = innerTrayOffset(wall, open);
+  const outerSrc = boxMesh(part);
+  const innerSrc = boxMesh({
+    ...part,
+    lengthMm: iL,
+    widthMm: iW,
+    heightMm: iH,
+    bevelMm: 0,
+    faces: innerFaces,
+  });
+  const active: BoxFace[] = [];
+  let rUse = 0;
+  for (const f of notchWalls) {
+    if (f === open) continue;
+    const { span, depth } = wallSpanAndDepth(f, open, L, W, H);
+    const r = clampNotchRadius(notchRadius, span, depth);
+    if (r > 0) {
+      active.push(f);
+      rUse = Math.max(rUse, r);
+    }
+  }
+  const skip = new Set<BoxFace>([open, ...active]);
+  const notch = active.length ? { walls: new Set(active), radius: rUse } : undefined;
+  const oPos: number[] = [];
+  const oUv: number[] = [];
+  const oNrm: number[] = [];
+  const oFaces: BoxFace[] = [];
+  pushMesh(oPos, oUv, oNrm, oFaces, outerSrc, 0, 0, 0, false, skip);
+  for (const f of active) {
+    pushNotchedWall(oPos, oUv, oNrm, oFaces, f, open, L, W, H, part.faces[f], rUse, 0, 0, 0, false);
+  }
+  pushOpenRim(oPos, oUv, oNrm, oFaces, L, W, H, iL, iW, iH, ox, oy, oz, part.faces[open], open, notch);
+  const iPos: number[] = [];
+  const iUv: number[] = [];
+  const iNrm: number[] = [];
+  const iFaces: BoxFace[] = [];
+  pushMesh(iPos, iUv, iNrm, iFaces, innerSrc, ox, oy, oz, true, skip);
+  for (const f of active) {
+    pushNotchedWall(iPos, iUv, iNrm, iFaces, f, open, iL, iW, iH, innerFaces[f] ?? part.faces[f], rUse, ox, oy, oz, true);
+  }
+  return {
+    outer: {
+      pos: new Float32Array(oPos),
+      uv: new Float32Array(oUv),
+      nrm: new Float32Array(oNrm),
+      faces: oFaces,
+      size: { L, W, H },
+    },
+    inner: {
+      pos: new Float32Array(iPos),
+      uv: new Float32Array(iUv),
+      nrm: new Float32Array(iNrm),
+      faces: iFaces,
+      size: { L: iL, W: iW, H: iH },
+    },
+  };
+}
+
+function closedPartOffset(box: PackagingBox, part: "lid" | "base"): Vec3 {
+  const L = box.lengthMm;
+  const W = box.widthMm;
+  const H = box.heightMm;
+  const lidH = boxLidHeight(box);
+  const baseH = boxBaseHeight(box);
+  const sleeve = boxSleeveOf(box);
+  if (sleeve === "frontBack") {
+    const z = part === "lid" ? W / 2 - lidH / 2 : -W / 2 + baseH / 2;
+    return [0, 0, z];
+  }
+  if (sleeve === "leftRight") {
+    const x = part === "lid" ? L / 2 - lidH / 2 : -L / 2 + baseH / 2;
+    return [x, 0, 0];
+  }
+  const y = part === "lid" ? H / 2 - lidH / 2 : baseH / 2 - H / 2;
+  return [0, y, 0];
+}
+
+export type PackagingPartMesh = {
+  part: "body" | "lid" | "base";
+  layer: "outer" | "inner";
+  mesh: BoxMesh;
+};
+
+export function packagingPartMeshes(box: PackagingBox, lidOpen = boxLidOpen(box)): PackagingPartMesh[] {
+  if (box.mode !== "lidBase") return [{ part: "body", layer: "outer", mesh: boxMesh(box) }];
+  const sleeve = boxSleeveOf(box);
+  const wall = boxWallMm(box);
+  const lift = boxLidLiftVec(box, lidOpen);
+  const out: PackagingPartMesh[] = [];
+  for (const part of ["base", "lid"] as const) {
+    const maps = partMapsOf(box, part);
+    const world = boxPartWorldMm(box, part);
+    const innerWorld = boxPartInnerMm(box, part);
+    const open = sleeveOpenFace(sleeve, part);
+    const partBox: PackagingBox = {
+      ...box,
+      mode: "simple",
+      lengthMm: world.lengthMm,
+      widthMm: world.widthMm,
+      heightMm: world.heightMm,
+      faces: maps.faces,
+    };
+    const innerIslands = maps.innerFaces ?? defaultUvNet(innerWorld.lengthMm, innerWorld.widthMm, innerWorld.heightMm);
+    const layers = trayLayerMeshes(
+      partBox,
+      wall,
+      open,
+      innerIslands,
+      part === "lid" ? lidNotchWalls(box) : [],
+      part === "lid" ? boxLidNotchRadiusMm(box) : 0,
+    );
+    const offset = closedPartOffset(box, part);
+    const extra: Vec3 = part === "lid" ? lift : [0, 0, 0];
+    const dx = offset[0] + extra[0];
+    const dy = offset[1] + extra[1];
+    const dz = offset[2] + extra[2];
+    out.push({ part, layer: "outer", mesh: translateMesh(layers.outer, dx, dy, dz) });
+    if (layers.inner) {
+      out.push({ part, layer: "inner", mesh: translateMesh(layers.inner, dx, dy, dz) });
+    }
+  }
+  return out;
+}
+
+export function boxPoseModel(position: { x: number; y: number; z: number }, rotationDeg: { x: number; y: number; z: number }): Mat4 {
+  return matMul(
+    matTranslate(position.x, position.y, position.z),
+    matRotateXYZ((rotationDeg.x * Math.PI) / 180, (rotationDeg.y * Math.PI) / 180, (rotationDeg.z * Math.PI) / 180),
+  );
 }

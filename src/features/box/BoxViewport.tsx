@@ -1,17 +1,129 @@
 import { useEffect, useRef } from "react";
-import type { BoxFace, BoxRenderSetup, PackagingBox } from "@/model/types";
-import { BoxGl } from "./boxGl";
-import { loadFittedBoxTexture } from "./boxTexture";
+import { BOX_FACES, boxLidLiftVec, boxLidOpen, boxModeOf } from "@/model/box";
+import type { BoxFace, BoxRenderSetup, PackagingBox, UvIsland } from "@/model/types";
+import { boxPoseModel, matMul, matTranslate } from "./boxGeom";
+import { BoxGl, type SceneDrawItem } from "./boxGl";
+import { loadPackagingLayerTextures, packagingItemsWithTextures, packagingLookOf, type PackagingLayerTex } from "./boxDraw";
+import { drawAxisWidget } from "./axisWidget";
 import { drawFilmGate, filmSize, panCameraTarget } from "./filmGate";
+
+function uvSig(faces?: Record<BoxFace, UvIsland>) {
+  if (!faces) return "";
+  return BOX_FACES.map((f) => {
+    const i = faces[f];
+    return i
+      ? `${f}:${i.u},${i.v},${i.w},${i.h},${i.scaleX ?? 1},${i.scaleY ?? 1},${i.rotationDeg ?? 0},${i.flipU ? 1 : 0},${i.flipV ? 1 : 0}`
+      : f;
+  }).join(";");
+}
+
+function boxMeshSig(box: PackagingBox) {
+  return [
+    box.mode,
+    box.sleeve ?? "",
+    box.lengthMm,
+    box.widthMm,
+    box.heightMm,
+    box.lidHeightMm ?? "",
+    box.baseHeightMm ?? "",
+    box.wallMm ?? "",
+    box.lidFitMm ?? "",
+    box.lidNotchUpDown ? 1 : 0,
+    box.lidNotchLeftRight ? 1 : 0,
+    box.lidNotchRadiusMm ?? "",
+    box.bevelMm ?? "",
+    uvSig(box.faces),
+    uvSig(box.lid?.faces),
+    uvSig(box.lid?.innerFaces),
+    uvSig(box.base?.faces),
+    uvSig(box.base?.innerFaces),
+  ].join("|");
+}
+
+function boxPrintIds(box: PackagingBox) {
+  return [
+    box.textureAssetId,
+    box.foilMaskAssetId,
+    box.varnishMaskAssetId,
+    box.lid?.textureAssetId,
+    box.lid?.innerTextureAssetId,
+    box.lid?.foilMaskAssetId,
+    box.lid?.varnishMaskAssetId,
+    box.base?.textureAssetId,
+    box.base?.innerTextureAssetId,
+    box.base?.foilMaskAssetId,
+    box.base?.varnishMaskAssetId,
+  ].filter((id): id is string => !!id);
+}
+
+function boxHasPrints(box: PackagingBox) {
+  return boxPrintIds(box).length > 0;
+}
+
+function boxTexSig(box: PackagingBox, assets?: Record<string, string>) {
+  const p = (m?: {
+    textureAssetId?: string;
+    innerTextureAssetId?: string;
+    textureFit?: string;
+    innerTextureFit?: string;
+    textureTileScale?: number;
+    innerTextureTileScale?: number;
+    textureRotationDeg?: number;
+    innerTextureRotationDeg?: number;
+    foilMaskAssetId?: string;
+    varnishMaskAssetId?: string;
+  }) =>
+    [
+      m?.textureAssetId ?? "",
+      m?.innerTextureAssetId ?? "",
+      m?.textureFit ?? "",
+      m?.innerTextureFit ?? "",
+      m?.textureTileScale ?? "",
+      m?.innerTextureTileScale ?? "",
+      m?.textureRotationDeg ?? "",
+      m?.innerTextureRotationDeg ?? "",
+      m?.foilMaskAssetId ?? "",
+      m?.varnishMaskAssetId ?? "",
+    ].join(":");
+  const urls = boxPrintIds(box)
+    .map((id) => `${id}=${assets?.[id] ?? ""}`)
+    .join(";");
+  return [
+    box.mode,
+    box.textureAssetId ?? "",
+    box.textureFit ?? "",
+    box.textureTileScale ?? "",
+    box.textureRotationDeg ?? "",
+    box.foilMaskAssetId ?? "",
+    box.varnishMaskAssetId ?? "",
+    p(box.lid),
+    p(box.base),
+    urls,
+  ].join("|");
+}
+
+function withLidPreview(items: SceneDrawItem[], box: PackagingBox, open: number, model: ReturnType<typeof boxPoseModel>): SceneDrawItem[] {
+  const lift = boxLidLiftVec(box, open);
+  const lidModel = lift[0] || lift[1] || lift[2] ? matMul(model, matTranslate(lift[0], lift[1], lift[2])) : model;
+  return items.map((it) => ({
+    ...it,
+    model: it.id.includes(":lid:") ? lidModel : model,
+  }));
+}
 
 export function BoxViewport({
   box,
   render,
-  textureSrc,
+  assets,
   projectDir,
   selectedFace,
+  outlinePartId,
   onSelectFace,
+  lidOpen,
+  onLidOpen,
+  onLidPreview,
   onOrbit,
+  onBusyChange,
   transparentBg,
   gizmos = true,
   filmGate = false,
@@ -19,11 +131,16 @@ export function BoxViewport({
 }: {
   box: PackagingBox;
   render: BoxRenderSetup;
-  textureSrc?: string | null;
+  assets?: Record<string, string>;
   projectDir?: string | null;
   selectedFace?: BoxFace | null;
+  outlinePartId?: string | null;
   onSelectFace?: (face: BoxFace) => void;
+  lidOpen?: number;
+  onLidOpen?: (open: number) => void;
+  onLidPreview?: (open: number) => void;
   onOrbit?: (yaw: number, pitch: number, distance: number, target?: { x: number; y: number; z: number }) => void;
+  onBusyChange?: (busy: boolean) => void;
   transparentBg?: boolean;
   gizmos?: boolean;
   filmGate?: boolean;
@@ -35,30 +152,62 @@ export function BoxViewport({
   const glRef = useRef<BoxGl | null>(null);
   const boxRef = useRef(box);
   const renderRef = useRef(render);
-  const texRef = useRef<HTMLImageElement | HTMLCanvasElement | null>(null);
+  const itemsRef = useRef<SceneDrawItem[]>([]);
   const faceRef = useRef(selectedFace);
+  const outlineRef = useRef(outlinePartId);
   const transRef = useRef(transparentBg);
   const gizmosRef = useRef(gizmos);
   const filmGateRef = useRef(filmGate);
   const onOrbitRef = useRef(onOrbit);
+  const onBusyRef = useRef(onBusyChange);
+  const lidOpenRef = useRef(lidOpen);
+  const loadGen = useRef(0);
+  const texRef = useRef<Map<string, PackagingLayerTex>>(new Map());
+  const assetsRef = useRef(assets);
+  const projectDirRef = useRef(projectDir);
   boxRef.current = box;
   renderRef.current = render;
   faceRef.current = selectedFace;
+  outlineRef.current = outlinePartId;
   transRef.current = transparentBg;
   gizmosRef.current = gizmos;
   filmGateRef.current = filmGate;
   onOrbitRef.current = onOrbit;
+  onBusyRef.current = onBusyChange;
+  lidOpenRef.current = lidOpen;
+  assetsRef.current = assets;
+  projectDirRef.current = projectDir;
+
+  function liveItems() {
+    const live = boxRef.current;
+    const setup = renderRef.current;
+    const model = boxPoseModel(setup.position, setup.rotationDeg);
+    const open = lidOpenRef.current ?? boxLidOpen(live);
+    const look = packagingLookOf(live);
+    return withLidPreview(
+      itemsRef.current.map((it) => ({ ...it, look })),
+      live,
+      open,
+      model,
+    );
+  }
 
   function paint() {
     const gl = glRef.current;
     const wrap = wrapRef.current;
     const overlay = overlayRef.current;
     if (!gl || !wrap) return;
-    gl.draw(renderRef.current, {
+    const live = boxRef.current;
+    const setup = renderRef.current;
+    const items = liveItems();
+    gl.drawScene(setup, items, {
       selectedFace: faceRef.current,
+      outlineItemId: outlineRef.current,
       transparentBg: transRef.current,
       gizmos: gizmosRef.current,
       filmGate: filmGateRef.current,
+      groundY: -live.heightMm / 2,
+      gridSize: Math.max(80, Math.max(live.lengthMm, live.widthMm) * 1.6),
     });
     if (!overlay) return;
     const r = wrap.getBoundingClientRect();
@@ -71,8 +220,9 @@ export function BoxViewport({
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, overlay.width, overlay.height);
+    if (gizmosRef.current) drawAxisWidget(ctx, r.width, r.height, dpr, setup.camera.yaw, setup.camera.pitch);
     if (!filmGateRef.current) return;
-    const film = filmSize(renderRef.current);
+    const film = filmSize(setup);
     drawFilmGate(ctx, overlay.width, overlay.height, film.w, film.h, dpr);
   }
 
@@ -82,8 +232,6 @@ export function BoxViewport({
     if (!canvas || !wrap) return;
     const renderer = new BoxGl(canvas);
     glRef.current = renderer;
-    renderer.setMesh(boxRef.current);
-    if (texRef.current) renderer.setTextureImage(texRef.current);
     const ro = new ResizeObserver(() => {
       const r = wrap.getBoundingClientRect();
       renderer.setSize(r.width, r.height);
@@ -109,45 +257,56 @@ export function BoxViewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once
   }, []);
 
-  useEffect(() => {
-    glRef.current?.setMesh(box);
+  function assemble() {
+    const live = boxRef.current;
+    itemsRef.current = packagingItemsWithTextures(live, boxPoseModel(renderRef.current.position, renderRef.current.rotationDeg), texRef.current, 0);
     paint();
-  }, [box, box.lengthMm, box.widthMm, box.heightMm, box.faces]);
+  }
+
+  const meshSig = boxMeshSig(box);
+  const texSig = boxTexSig(box, assets);
 
   useEffect(() => {
-    paint();
-  }, [render]);
-
-  useEffect(() => {
-    paint();
-  }, [selectedFace, transparentBg, gizmos, filmGate]);
+    assemble();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meshSig]);
 
   useEffect(() => {
     let dead = false;
-    if (!textureSrc) {
-      texRef.current = null;
-      glRef.current?.setTextureImage(null);
-      paint();
-      return;
-    }
-    void loadFittedBoxTexture(textureSrc, projectDir, box.textureFit ?? "cover", box.textureTileScale ?? 1)
-      .then((img) => {
-        if (dead) return;
-        texRef.current = img;
-        glRef.current?.setTextureImage(img);
-        paint();
+    const gen = ++loadGen.current;
+    const live = boxRef.current;
+    const lock = boxHasPrints(live);
+    onBusyRef.current?.(lock);
+    void loadPackagingLayerTextures(live, assetsRef.current ?? {}, projectDirRef.current)
+      .then((tex) => {
+        if (dead || gen !== loadGen.current) return;
+        texRef.current = tex;
+        assemble();
+        onBusyRef.current?.(false);
       })
       .catch(() => {
-        if (!dead) {
-          texRef.current = null;
-          glRef.current?.setTextureImage(null);
-          paint();
-        }
+        if (dead || gen !== loadGen.current) return;
+        onBusyRef.current?.(false);
       });
     return () => {
       dead = true;
     };
-  }, [textureSrc, projectDir, box.textureAssetId, box.textureFit, box.textureTileScale]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [texSig]);
+
+  useEffect(() => {
+    return () => onBusyRef.current?.(false);
+  }, []);
+
+  useEffect(() => {
+    paint();
+  }, [render, selectedFace, outlinePartId, transparentBg, gizmos, filmGate, lidOpen, box.material]);
+
+  const shownOpen = lidOpen ?? boxLidOpen(box);
+  function commitOpen(n: number) {
+    onLidPreview?.(n);
+    onLidOpen?.(n);
+  }
 
   return (
     <div
@@ -178,7 +337,8 @@ export function BoxViewport({
           return;
         }
         const rect = canvas.getBoundingClientRect();
-        const hit = gl.pick(e.clientX - rect.left, e.clientY - rect.top);
+        const items = liveItems();
+        const hit = gl.pickFace(e.clientX - rect.left, e.clientY - rect.top, items, outlineRef.current);
         if (hit && onSelectFace) onSelectFace(hit);
         const move = (ev: PointerEvent) => {
           const dx = ev.clientX - startX;
@@ -195,6 +355,36 @@ export function BoxViewport({
     >
       <canvas ref={canvasRef} />
       <canvas ref={overlayRef} className="film-gate-overlay" />
+      {onLidOpen && boxModeOf(box) === "lidBase" ? (
+        <div className="box-lid-dock" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="row">
+            <button
+              type="button"
+              className={`btn btn-small ${shownOpen < 0.05 ? "btn-primary" : ""}`}
+              onClick={() => commitOpen(0)}
+            >
+              合上
+            </button>
+            <button
+              type="button"
+              className={`btn btn-small ${shownOpen > 0.95 ? "btn-primary" : ""}`}
+              onClick={() => commitOpen(1)}
+            >
+              打开
+            </button>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={shownOpen}
+            onChange={(e) => onLidPreview?.(Number(e.target.value))}
+            onPointerUp={(e) => commitOpen(Number((e.target as HTMLInputElement).value))}
+            onPointerCancel={(e) => commitOpen(Number((e.currentTarget as HTMLInputElement).value))}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

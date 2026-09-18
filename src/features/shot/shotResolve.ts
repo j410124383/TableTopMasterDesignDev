@@ -1,14 +1,15 @@
-import { boxTextureFit, defaultUvNet } from "@/model/box";
+import { boxLidLiftVec, boxLidOpen, boxModeOf, defaultUvNet } from "@/model/box";
 import { templateFromBlueprint } from "@/model/normalize";
 import { cardCoreRgb, cardStockMm } from "@/model/piece";
 import { boardLongestMm, boardThicknessMm } from "@/model/board";
-import type { BoardPiece, ProductShotItem, Project, ShotStackLook } from "@/model/types";
+import type { BoardPiece, PackagingBox, ProductShotItem, Project, ShotStackLook } from "@/model/types";
 import { renderCardToCanvas } from "@/render/drawCard";
 import { mmToPx } from "@/lib/mm";
-import { boxMesh, matIdentity, matMul, matRotateXYZ, matScale, matTranslate, roundedSlabMesh, type BoxMesh, type Mat4 } from "@/features/box/boxGeom";
-import { loadFittedBoxTexture } from "@/features/box/boxTexture";
+import { matIdentity, matMul, matRotateXYZ, matScale, matTranslate, packagingPartMeshes, roundedSlabMesh, type BoxMesh, type Mat4 } from "@/features/box/boxGeom";
+import { packagingLookOf, resolvePackagingDrawItems } from "@/features/box/boxDraw";
 import { loadBoardCutout } from "@/features/board/boardCutout";
 import type { SceneDrawItem } from "@/features/box/boxGl";
+import { capCardDpi } from "./shotTexture";
 import { faceFlipMat, itemFaceDown, stackDrawCards, stackLayout, stackMeshThickMm, stackRestY, stackShapeOf, stackSlice } from "./shotStack";
 
 const cardCache = new Map<string, HTMLCanvasElement>();
@@ -16,25 +17,55 @@ const cardCache = new Map<string, HTMLCanvasElement>();
 export function shotGeomSig(project: Project) {
   const bps = project.blueprints.map((b) => `${b.id}:${b.thicknessMm}:${b.cornerRadiusMm}:${b.core}:${b.size.w}x${b.size.h}`).join("|");
   const sets = project.sets.map((s) => `${s.id}:${s.cards.reduce((n, c) => n + (c.qty || 0), 0)}`).join("|");
-  const boxes = (project.boxes ?? []).map((b) => `${b.id}:${b.bevelMm}:${b.lengthMm}x${b.widthMm}x${b.heightMm}:${b.textureAssetId ?? ""}`).join("|");
+  const boxes = (project.boxes ?? [])
+    .map(
+      (b) =>
+        `${b.id}:${b.mode}:${b.sleeve}:${b.bevelMm}:${b.lengthMm}x${b.widthMm}x${b.heightMm}:${b.lidHeightMm}:${b.baseHeightMm}:${b.wallMm}:${b.lidFitMm}:${b.lidNotchUpDown ? 1 : 0}:${b.lidNotchLeftRight ? 1 : 0}:${b.lidNotchRadiusMm ?? ""}:${b.textureAssetId ?? ""}:${b.lid?.textureAssetId ?? ""}:${b.base?.textureAssetId ?? ""}:${b.lid?.innerTextureAssetId ?? ""}:${b.base?.innerTextureAssetId ?? ""}:${b.foilMaskAssetId}:${b.lid?.foilMaskAssetId}:${b.base?.foilMaskAssetId}:${b.varnishMaskAssetId}:${b.lid?.varnishMaskAssetId}:${b.base?.varnishMaskAssetId}:${b.material?.metallic}:${b.material?.roughness}:${b.material?.baseColor}`,
+    )
+    .join("|");
   const boards = (project.boards ?? []).map((b) => `${b.id}:${b.textureAssetId}:${b.thicknessMm}:${b.longestMm ?? 40}`).join("|");
   return `${bps}#${sets}#${boxes}#${boards}`;
 }
+
+export type ShotPackRole = "lid" | "base" | "body";
 
 export type ShotDrawPart = {
   mesh: BoxMesh;
   image: HTMLCanvasElement | HTMLImageElement | null;
   backImage?: HTMLCanvasElement | HTMLImageElement | null;
+  foilImage?: HTMLCanvasElement | HTMLImageElement | null;
+  varnishImage?: HTMLCanvasElement | HTMLImageElement | null;
   tint?: [number, number, number];
+  look?: SceneDrawItem["look"];
+  coverBase?: boolean;
+  packRole?: ShotPackRole;
   local: Mat4;
 };
+
+function packRoleFromDrawId(id: string): ShotPackRole {
+  const role = id.split(":")[1];
+  if (role === "lid" || role === "base") return role;
+  return "body";
+}
+
+export function shotBoxLidOpen(item: ProductShotItem, box: PackagingBox): number {
+  const n = Number(item.lidOpen);
+  if (Number.isFinite(n)) return Math.max(0, Math.min(1, n));
+  return boxLidOpen(box);
+}
+
+function boxPartOpenLocal(box: PackagingBox, role: ShotPackRole | undefined, open: number): Mat4 {
+  if (role !== "lid" || boxModeOf(box) !== "lidBase") return matIdentity();
+  const lift = boxLidLiftVec(box, open);
+  return matTranslate(lift[0], lift[1], lift[2]);
+}
 
 export function shotItemContentKey(item: ProductShotItem, project?: Project) {
   const base = `${item.kind}|${item.refId}|${item.setId ?? ""}|${item.cardId ?? ""}|${item.face ?? "front"}|${item.slotId ?? ""}`;
   if (!project) return base;
   if (item.kind === "box") {
     const box = (project.boxes ?? []).find((b) => b.id === item.refId);
-    return `${base}|${box?.bevelMm ?? 0}|${box?.lengthMm ?? 0}x${box?.widthMm ?? 0}x${box?.heightMm ?? 0}|${box?.textureAssetId ?? ""}`;
+    return `${base}|${box?.mode}|${box?.sleeve}|${box?.bevelMm ?? 0}|${box?.lengthMm ?? 0}x${box?.widthMm ?? 0}x${box?.heightMm ?? 0}|${box?.lidHeightMm}|${box?.baseHeightMm}|${box?.wallMm}|${box?.lidFitMm}|${box?.lidNotchUpDown ? 1 : 0}|${box?.lidNotchLeftRight ? 1 : 0}|${box?.lidNotchRadiusMm ?? ""}|${box?.textureAssetId ?? ""}|${box?.lid?.textureAssetId ?? ""}|${box?.base?.textureAssetId ?? ""}|${box?.lid?.innerTextureAssetId ?? ""}|${box?.base?.innerTextureAssetId ?? ""}|${box?.foilMaskAssetId}|${box?.lid?.foilMaskAssetId}|${box?.base?.foilMaskAssetId}|${box?.varnishMaskAssetId}|${box?.lid?.varnishMaskAssetId}|${box?.base?.varnishMaskAssetId}|${box?.material?.baseColor}|${box?.material?.metallic}|${box?.material?.roughness}`;
   }
   if (item.kind === "board") {
     const piece = (project.boards ?? []).find((b) => b.id === item.refId);
@@ -97,19 +128,20 @@ async function renderFace(
 ): Promise<HTMLCanvasElement | null> {
   const bp = project.blueprints.find((b) => b.id === blueprintId);
   if (!bp) return null;
+  const usedDpi = capCardDpi(bp, dpi);
   const template = templateFromBlueprint(bp, face);
   const rgb = cardCoreRgb(bp);
-  const key = `${blueprintId}|${face}|${dpi}|${JSON.stringify(fields)}|${honorVisibleWhen}|${template.layers.length}`;
+  const key = `${blueprintId}|${face}|${usedDpi}|${JSON.stringify(fields)}|${honorVisibleWhen}|${template.layers.length}`;
   const hit = cardCache.get(key);
   if (hit) return hit;
   if (!template.layers.length) {
-    const blank = solidCoreCanvas(Math.round(mmToPx(bp.size.w, dpi)), Math.round(mmToPx(bp.size.h, dpi)), rgb);
+    const blank = solidCoreCanvas(Math.round(mmToPx(bp.size.w, usedDpi)), Math.round(mmToPx(bp.size.h, usedDpi)), rgb);
     cardCache.set(key, blank);
     return blank;
   }
   try {
     const canvas = await renderCardToCanvas(template, {
-      dpi,
+      dpi: usedDpi,
       fields,
       assets: project.assets,
       project,
@@ -120,7 +152,7 @@ async function renderFace(
     cardCache.set(key, opaque);
     return opaque;
   } catch {
-    const fallback = solidCoreCanvas(Math.round(mmToPx(bp.size.w, dpi)), Math.round(mmToPx(bp.size.h, dpi)), rgb);
+    const fallback = solidCoreCanvas(Math.round(mmToPx(bp.size.w, usedDpi)), Math.round(mmToPx(bp.size.h, usedDpi)), rgb);
     cardCache.set(key, fallback);
     return fallback;
   }
@@ -146,30 +178,40 @@ function cardFaceLocal(item: ProductShotItem): Mat4 {
   return item.kind === "card" && itemFaceDown(item) ? faceFlipMat() : matIdentity();
 }
 
+function missingBox(): PackagingBox {
+  return {
+    id: "ph",
+    name: "ph",
+    lengthMm: 100,
+    widthMm: 150,
+    heightMm: 50,
+    faces: defaultUvNet(100, 150, 50),
+  };
+}
+
+export function stubBoxDrawItems(item: ProductShotItem, selectedId: string | null, project: Project): SceneDrawItem[] {
+  const box = (project.boxes ?? []).find((b) => b.id === item.refId) ?? missingBox();
+  const model = itemModel(item);
+  const selected = item.id === selectedId;
+  const open = shotBoxLidOpen(item, box);
+  const look = packagingLookOf(box);
+  return packagingPartMeshes(box, 0).map((part) => ({
+    id: item.id,
+    mesh: part.mesh,
+    image: null,
+    look,
+    coverBase: true,
+    tint: [1, 1, 1] as [number, number, number],
+    model: matMul(model, boxPartOpenLocal(box, part.part, open)),
+    selected,
+  }));
+}
+
 export function stubShotDrawItem(item: ProductShotItem, selectedId: string | null, project: Project): SceneDrawItem {
   const model = itemModel(item);
   const selected = item.id === selectedId;
   const tint: [number, number, number] = [0.55, 0.55, 0.62];
-  if (item.kind === "box") {
-    const box = (project.boxes ?? []).find((b) => b.id === item.refId);
-    return {
-      id: item.id,
-      mesh: box
-        ? boxMesh(box)
-        : boxMesh({
-            id: "ph",
-            name: "ph",
-            lengthMm: 100,
-            widthMm: 150,
-            heightMm: 50,
-            faces: defaultUvNet(100, 150, 50),
-          }),
-      image: null,
-      model,
-      selected,
-      tint,
-    };
-  }
+  if (item.kind === "box") return stubBoxDrawItems(item, selectedId, project)[0]!;
   if (item.kind === "stack") {
     const set = project.sets.find((s) => s.id === item.refId);
     const bp = set ? project.blueprints.find((b) => b.id === set.blueprintId) : undefined;
@@ -228,7 +270,7 @@ export async function resolveShotDrawItems(
   selectedId: string | null,
   project: Project,
   projectDir?: string | null,
-  opts?: { dpi?: number },
+  opts?: { dpi?: number; contourMax?: number },
 ): Promise<SceneDrawItem[]> {
   const dpi = opts?.dpi ?? 96;
   const out: SceneDrawItem[] = [];
@@ -237,21 +279,26 @@ export async function resolveShotDrawItems(
     const selected = item.id === selectedId;
     if (item.kind === "box") {
       if (!item.refId) {
-        out.push(stubShotDrawItem(item, selectedId, project));
+        out.push(...stubBoxDrawItems(item, selectedId, project));
         continue;
       }
       const box = (project.boxes ?? []).find((b) => b.id === item.refId);
-      if (!box) continue;
-      let image: HTMLCanvasElement | HTMLImageElement | null = null;
-      const src = box.textureAssetId ? project.assets[box.textureAssetId] : null;
-      if (src) {
-        try {
-          image = await loadFittedBoxTexture(src, projectDir, boxTextureFit(box), box.textureTileScale ?? 1);
-        } catch {
-          image = null;
-        }
+      if (!box) {
+        out.push(...stubBoxDrawItems(item, selectedId, project));
+        continue;
       }
-      out.push({ id: item.id, mesh: boxMesh(box), image, model, selected });
+      const parts = await resolvePackagingDrawItems(box, project.assets, projectDir, matIdentity(), selected, 0);
+      const open = shotBoxLidOpen(item, box);
+      for (const part of parts) {
+        const role = packRoleFromDrawId(part.id);
+        out.push({
+          ...part,
+          id: item.id,
+          model: matMul(model, boxPartOpenLocal(box, role, open)),
+          selected,
+          coverBase: true,
+        });
+      }
       continue;
     }
     if (item.kind === "board") {
@@ -259,7 +306,7 @@ export async function resolveShotDrawItems(
       if (piece) {
         const src = piece.textureAssetId ? project.assets[piece.textureAssetId] : undefined;
         try {
-          const { cutout, image } = await loadBoardCutout(piece, src, projectDir);
+          const { cutout, image } = await loadBoardCutout(piece, src, projectDir, { contourMax: opts?.contourMax });
           out.push({
             id: item.id,
             mesh: cutout.mesh,
@@ -341,18 +388,30 @@ export function composeShotDrawItems(
 ): SceneDrawItem[] {
   return items.flatMap((it) => {
     const hit = cache.get(shotItemContentKey(it, project));
-    if (!hit?.length) return [stubShotDrawItem(it, selectedId, project)];
+    if (!hit?.length) {
+      if (it.kind === "box") return stubBoxDrawItems(it, selectedId, project);
+      return [stubShotDrawItem(it, selectedId, project)];
+    }
     const model = itemModel(it);
     const selected = it.id === selectedId;
-    return hit.map((part) => ({
-      id: it.id,
-      mesh: part.mesh,
-      image: part.image,
-      backImage: part.backImage,
-      tint: part.tint,
-      model: matMul(model, part.local),
-      selected,
-    }));
+    const box = it.kind === "box" ? (project.boxes ?? []).find((b) => b.id === it.refId) : undefined;
+    const open = box ? shotBoxLidOpen(it, box) : 0;
+    return hit.map((part) => {
+      const extra = box ? boxPartOpenLocal(box, part.packRole, open) : matIdentity();
+      return {
+        id: it.id,
+        mesh: part.mesh,
+        image: part.image,
+        backImage: part.backImage,
+        foilImage: part.foilImage,
+        varnishImage: part.varnishImage,
+        look: part.look,
+        tint: part.tint,
+        coverBase: part.coverBase ?? it.kind === "box",
+        model: matMul(model, matMul(extra, part.local)),
+        selected,
+      };
+    });
   });
 }
 
@@ -360,15 +419,44 @@ export async function resolveShotItemParts(
   item: ProductShotItem,
   project: Project,
   projectDir?: string | null,
-  opts?: { dpi?: number },
+  opts?: { dpi?: number; contourMax?: number },
 ): Promise<ShotDrawPart[]> {
   const dpi = opts?.dpi ?? 96;
   if (item.kind === "stack") return resolveStackParts(item, project, dpi);
-  const drawn = await resolveShotDrawItems([item], null, project, projectDir, { dpi });
+  if (item.kind === "box") {
+    const box = (project.boxes ?? []).find((b) => b.id === item.refId);
+    if (!box) {
+      return stubBoxDrawItems(item, null, project).map((d) => ({
+        mesh: d.mesh,
+        image: null,
+        look: d.look,
+        tint: d.tint,
+        coverBase: true,
+        packRole: "body",
+        local: matIdentity(),
+      }));
+    }
+    const parts = await resolvePackagingDrawItems(box, project.assets, projectDir, matIdentity(), false, 0);
+    return parts.map((d) => ({
+      mesh: d.mesh,
+      image: d.image,
+      foilImage: d.foilImage,
+      varnishImage: d.varnishImage,
+      look: d.look,
+      tint: d.tint,
+      coverBase: true,
+      packRole: packRoleFromDrawId(d.id),
+      local: matIdentity(),
+    }));
+  }
+  const drawn = await resolveShotDrawItems([item], null, project, projectDir, { dpi, contourMax: opts?.contourMax });
   return drawn.map((d) => ({
     mesh: d.mesh,
     image: d.image,
     backImage: d.backImage,
+    foilImage: d.foilImage,
+    varnishImage: d.varnishImage,
+    look: d.look,
     tint: d.tint,
     local: cardFaceLocal(item),
   }));

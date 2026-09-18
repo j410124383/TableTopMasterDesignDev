@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { BoxFace, UvIsland } from "@/model/types";
-import { BOX_FACES, defaultUvNet, FACE_LABEL } from "@/model/box";
+import { BOX_FACES, blankUvNetFor, FACE_LABEL } from "@/model/box";
 import { SplitHandle, usePaneSize } from "@/ui/Splitter";
 import { UvEditor } from "./UvEditor";
 
@@ -19,6 +19,11 @@ export function BoxUvPanel({
   projectDir,
   textureFit,
   textureTileScale,
+  textureRotationDeg = 0,
+  onRotateTexture,
+  blankPart,
+  blankLayer = "outer",
+  title,
 }: {
   open: boolean;
   onClose: () => void;
@@ -34,6 +39,11 @@ export function BoxUvPanel({
   onPatchAll: (faces: Record<BoxFace, UvIsland>) => void;
   textureFit?: "original" | "cover" | "tile";
   textureTileScale?: number;
+  textureRotationDeg?: number;
+  onRotateTexture?: () => void;
+  blankPart?: "lid" | "base" | "body";
+  blankLayer?: "outer" | "inner";
+  title?: string;
 }) {
   const faceIdx = BOX_FACES.indexOf(face);
   const island = faces[face];
@@ -42,6 +52,7 @@ export function BoxUvPanel({
   const uniform = island.uniformScale !== false;
   const sx = island.scaleX ?? 1;
   const sy = island.scaleY ?? 1;
+  const blankNet = () => blankUvNetFor(lengthMm, widthMm, heightMm, { part: blankPart, layer: blankLayer });
 
   const tools = useMemo(
     () => ({
@@ -79,7 +90,7 @@ export function BoxUvPanel({
       <div className="box-uv-panel" onMouseDown={(e) => e.stopPropagation()}>
         <header className="box-uv-head">
           <div>
-            <h2>UV 编辑器</h2>
+            <h2>{title ?? "UV 编辑器"}</h2>
             <p className="muted">滚轮缩放画布，中键或空格拖移。拖壳移动，角点缩放（默认等比例），蓝点旋转。</p>
           </div>
           <button type="button" className="btn" onClick={onClose}>
@@ -97,6 +108,7 @@ export function BoxUvPanel({
             snap={snap}
             textureFit={textureFit}
             textureTileScale={textureTileScale}
+            textureRotationDeg={textureRotationDeg}
           />
           <SplitHandle onDelta={(dx) => setSideW(Math.min(480, Math.max(200, sideW - dx)))} />
           <aside className="box-uv-side">
@@ -123,17 +135,25 @@ export function BoxUvPanel({
                 翻转 V
               </button>
             </div>
+            <div className="row" style={{ flexWrap: "wrap" }}>
+              <button type="button" className="btn btn-small" onClick={() => onRotateTexture?.()}>
+                贴图旋转 90°
+              </button>
+              <span className="muted" style={{ fontSize: 12 }}>
+                当前 {textureRotationDeg}°
+              </span>
+            </div>
             <button
               type="button"
               className="btn btn-small"
-              onClick={() => onPatch(face, defaultUvNet(lengthMm, widthMm, heightMm)[face])}
+              onClick={() => onPatch(face, blankNet()[face])}
             >
               重置当前壳
             </button>
             <button
               type="button"
               className="btn btn-small"
-              onClick={() => onPatchAll(defaultUvNet(lengthMm, widthMm, heightMm))}
+              onClick={() => onPatchAll(blankNet())}
             >
               按盒坯重排全部
             </button>

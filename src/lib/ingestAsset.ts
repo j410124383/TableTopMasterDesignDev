@@ -41,6 +41,18 @@ function bytesToBase64(buf: Uint8Array): string {
   return btoa(binary);
 }
 
+function srcBasename(src: string): string {
+  if (src.includes("/__fs/file")) {
+    try {
+      const p = new URL(src, "http://local").searchParams.get("p") ?? "";
+      return (p.replaceAll("\\", "/").split("/").pop() ?? "").toLowerCase();
+    } catch {
+      /* fall through */
+    }
+  }
+  return (src.split("?")[0]!.replaceAll("\\", "/").split("/").pop() ?? "").toLowerCase();
+}
+
 function findExistingAsset(
   assets: Record<string, string> | undefined,
   stem: string,
@@ -48,15 +60,12 @@ function findExistingAsset(
 ): { id: string; src: string; rel: string } | null {
   if (!assets) return null;
   const fileName = `${stem}${ext}`.toLowerCase();
+  const stemLc = stem.toLowerCase();
   for (const [id, src] of Object.entries(assets)) {
     const norm = src.replaceAll("\\", "/");
     const idNorm = id.replaceAll("\\", "/");
-    if (
-      idNorm === stem ||
-      idNorm.endsWith(`/${stem}`) ||
-      norm.toLowerCase().endsWith(`/${fileName}`) ||
-      norm.toLowerCase().endsWith(fileName)
-    ) {
+    const idBase = (idNorm.split("/").pop() ?? "").toLowerCase();
+    if (idNorm === stem || idBase === stemLc || srcBasename(src) === fileName) {
       const rel = norm.startsWith("assets/")
         ? norm
         : src.startsWith("/__fs/file")

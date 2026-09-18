@@ -45,7 +45,18 @@ function collectUsed(project: Project): Set<string> {
   for (const d of project.decks ?? []) {
     for (const c of d.cards) for (const v of Object.values(c.fields)) add(v);
   }
-  for (const b of project.boxes ?? []) add(b.textureAssetId);
+  for (const b of project.boxes ?? []) {
+    add(b.textureAssetId);
+    add(b.foilMaskAssetId);
+    add(b.varnishMaskAssetId);
+    for (const maps of [b.lid, b.base]) {
+      add(maps?.textureAssetId);
+      add(maps?.innerTextureAssetId);
+      add(maps?.foilMaskAssetId);
+      add(maps?.varnishMaskAssetId);
+    }
+  }
+  for (const bd of project.boards ?? []) add(bd.textureAssetId);
   add(project.meta.coverAsset);
   for (const f of project.fonts ?? []) add(f.assetId);
   for (const v of project.variables ?? []) add(v.replacement);

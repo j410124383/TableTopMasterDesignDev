@@ -1,6 +1,6 @@
 import { useEffect, useState, memo } from "react";
 import { BoxGl } from "@/features/box/boxGl";
-import { openRenderFolder, saveRenderPng } from "@/features/box/saveRenderPng";
+import { openExportModelFolder, openRenderFolder, saveRenderPng } from "@/features/box/saveRenderPng";
 import { uid } from "@/lib/id";
 import { templateFromBlueprint } from "@/model/normalize";
 import { ensureShotLook, nextItemOffset } from "@/model/shot";
@@ -13,6 +13,7 @@ import {
   removeShotCamera,
   shotCameraFromOrbit,
 } from "@/model/shotCamera";
+import { boxModeOf } from "@/model/box";
 import type { ProductShot, ProductShotItem, Project, ShotStackLook, ShotStackShape } from "@/model/types";
 import { renderCardToCanvas } from "@/render/drawCard";
 import { useAppStore } from "@/store/appStore";
@@ -24,9 +25,12 @@ import { IconCamera, IconFilter, IconGrid, IconLayout, IconLight, IconObject, Ic
 import { pageSlice, Pager } from "@/ui/Pager";
 import { ResolutionField } from "@/ui/ResolutionField";
 import { SplitHandle, usePaneSize } from "@/ui/Splitter";
+import { WorkLock } from "@/ui/WorkLock";
 import { applyProductLook } from "./shotLook";
+import { exportSceneFbx } from "./exportSceneFbx";
 import { applyShotLayout, fillShotSlot, SHOT_LAYOUTS, type ShotLayoutId } from "./shotLayout";
-import { defaultLieRotation, placeYForItem, placeYForShotItem, resolveShotDrawItems } from "./shotResolve";
+import { defaultLieRotation, placeYForItem, placeYForShotItem, resolveShotDrawItems, shotBoxLidOpen } from "./shotResolve";
+import { exportCardDpi, exportBoardContour, exportTextureOf } from "./shotTexture";
 import { STACK_CARD_CAP, expandSetCards, fanResolved, itemFaceDown, stackDrawCards, stackShapeOf, stackSlice } from "./shotStack";
 import { ShotLibrary } from "./ShotLibrary";
 import { ShotOutliner } from "./ShotOutliner";
@@ -35,7 +39,7 @@ import type { GizmoMode, GizmoSpace } from "./shotGizmo";
 
 const PAGE_SIZE = 12;
 
-function StackLookPanel({
+export function StackLookPanel({
   item,
   project,
   onChange,
@@ -231,6 +235,7 @@ function ShotEditor({ shot }: { shot: ProductShot }) {
   const setShotLibraryOpen = useEditorStore((s) => s.setShotLibraryOpen);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [railTab, setRailTab] = useState<"sets" | "cards" | "boards" | "boxes" | "cameras">("sets");
   const [cardSetId, setCardSetId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -406,7 +411,11 @@ function ShotEditor({ shot }: { shot: ProductShot }) {
       const canvas = document.createElement("canvas");
       const gl = new BoxGl(canvas);
       gl.setSize(w, h, 1);
-      const drawn = await resolveShotDrawItems(shot.items, null, project, currentPath);
+      const quality = exportTextureOf(render.exportTexture);
+      const drawn = await resolveShotDrawItems(shot.items, null, project, currentPath, {
+        dpi: exportCardDpi(quality),
+        contourMax: exportBoardContour(quality),
+      });
       let mask: HTMLCanvasElement | null = null;
       if (look.outline?.enabled) {
         gl.drawScene(render, drawn, { gizmos: false, silhouette: true });
@@ -427,6 +436,29 @@ function ShotEditor({ shot }: { shot: ProductShot }) {
     }
   }
 
+  async function doExportModel() {
+    if (!shot.items.some((it) => it.refId)) {
+      setError("场景里还没有物件");
+      return;
+    }
+    setExporting(true);
+    try {
+      const msg = await exportSceneFbx({
+        name: shot.name,
+        items: shot.items,
+        project,
+        projectDir: currentPath,
+        render,
+        note: `看穿 ${lookThroughId ?? ""}`,
+      });
+      setInfo(msg);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "导出模型失败");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="page box-page shot-page">
       <div className="page-head page-head-compact">
@@ -441,7 +473,7 @@ function ShotEditor({ shot }: { shot: ProductShot }) {
             <p>视口写着当前看穿的摄像机。空白左键转镜头不会丢掉选中；单击空白才取消。中键或 Alt+左键平移；滚轮推拉。</p>
             <p>大纲里选摄像机，点摄像机图标把视口贴合到那台机（Look Through）。</p>
             <p>可切换透视与等距。应用布局模版后，把卡和盒子填进半透明占位体。</p>
-            <p>包装盒倒角在包装盒编辑器里调，本页不改。</p>
+            <p>包装盒倒角在包装盒编辑器里调，本页不改。选中天地盒可以合上或打开。</p>
           </HelpTip>
         </div>
         <div className="row">
@@ -719,8 +751,31 @@ function ShotEditor({ shot }: { shot: ProductShot }) {
                     patchShot((s) => ({ ...s, render: { ...s.render, resolutionW: rw, resolutionH: rh } }))
                   }
                 />
+                <div className="field">
+                  <label>出图贴图</label>
+                  <div className="row">
+                    <button
+                      type="button"
+                      className={`btn btn-small ${exportTextureOf(render.exportTexture) === "standard" ? "btn-primary" : ""}`}
+                      onClick={() => patchShot((s) => ({ ...s, render: { ...s.render, exportTexture: "standard" } }))}
+                    >
+                      标准
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-small ${exportTextureOf(render.exportTexture) === "max" ? "btn-primary" : ""}`}
+                      onClick={() => patchShot((s) => ({ ...s, render: { ...s.render, exportTexture: "max" } }))}
+                    >
+                      最高
+                    </button>
+                  </div>
+                  <p className="muted">只影响下一次出图，不拖慢视口。最高：卡面 300 DPI、板件原图。</p>
+                </div>
                 <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void doRender()}>
                   {busy ? "渲染中…" : "渲染并保存到「渲染图」"}
+                </button>
+                <button type="button" className="btn" disabled={exporting || !shot.items.some((it) => it.refId)} onClick={() => void doExportModel()}>
+                  {exporting ? "导出中…" : "导出模型"}
                 </button>
                 <button
                   type="button"
@@ -728,6 +783,9 @@ function ShotEditor({ shot }: { shot: ProductShot }) {
                   onClick={() => void openRenderFolder(currentPath).then(setInfo)}
                 >
                   打开渲染文件夹
+                </button>
+                <button type="button" className="btn" onClick={() => void openExportModelFolder(currentPath).then(setInfo)}>
+                  打开导出模型文件夹
                 </button>
               </>
             ) : null}
@@ -1145,6 +1203,42 @@ function ShotEditor({ shot }: { shot: ProductShot }) {
                     onChange={(e) => patchItem(selected.id, { scale: Number(e.target.value) }, "shot-scale")}
                   />
                 </div>
+                {selected.kind === "box" && selected.refId
+                  ? (() => {
+                      const box = (project.boxes ?? []).find((b) => b.id === selected.refId);
+                      if (!box || boxModeOf(box) !== "lidBase") return null;
+                      const open = shotBoxLidOpen(selected, box);
+                      return (
+                        <div className="field">
+                          <label>开合</label>
+                          <div className="row">
+                            <button
+                              type="button"
+                              className={`btn btn-small ${open < 0.05 ? "btn-primary" : ""}`}
+                              onClick={() => patchItem(selected.id, { lidOpen: 0 }, "shot-lid")}
+                            >
+                              合上
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn btn-small ${open > 0.95 ? "btn-primary" : ""}`}
+                              onClick={() => patchItem(selected.id, { lidOpen: 1 }, "shot-lid")}
+                            >
+                              打开
+                            </button>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={open}
+                            onChange={(e) => patchItem(selected.id, { lidOpen: Number(e.target.value) }, "shot-lid")}
+                          />
+                        </div>
+                      );
+                    })()
+                  : null}
                 {selected.kind === "card" || selected.kind === "stack" ? (
                   <div className="field">
                     <label>站姿</label>
@@ -1201,6 +1295,8 @@ function ShotEditor({ shot }: { shot: ProductShot }) {
           </div>
         </aside>
       </div>
+      <WorkLock open={busy} title="正在写出渲染图" />
+      <WorkLock open={exporting} title="正在导出模型" />
     </div>
   );
 }

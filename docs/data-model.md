@@ -1,7 +1,7 @@
 # 数据模型
 
 > 未标注产品确认的段落 `[反推]` 自 `src/model/types.ts`、`schema.ts`、`normalize.ts`。  
-> `kind` / `thicknessMm` / `core` / `pieceSpecs` / `boards` / `boxes` / `shots` / `textureFit` / `bevelMm` / `rulebooks` / `cameras` / `lookThroughId` 为产品已确认；说明书编辑器仍占位。
+> `kind` / `thicknessMm` / `core` / `pieceSpecs` / `boards` / `boxes` / `shots` / `studios` / `textureFit` / `bevelMm` / `rulebooks` / `cameras` / `lookThroughId` / `box.mode` / `box.material` 为产品已确认；说明书编辑器仍占位。
 
 ## Schema 版本
 
@@ -19,6 +19,7 @@ erDiagram
   Project ||--o{ CardSet : contains
   Project ||--o{ PackagingBox : "包装盒"
   Project ||--o{ ProductShot : "产品图"
+  Project ||--o{ Studio : "影棚"
   Project ||--o{ Rulebook : "说明书"
   Blueprint }o--|| PieceSpec : specId
   Blueprint ||--o{ Layer : frontLayers_backLayers
@@ -36,8 +37,9 @@ erDiagram
 |------|------|------|
 | 卡牌 | `pieceSpecs` + `blueprints` + `sets` | 规格是纸张物理参数块；蓝图挂规格并选竖/横。纸厚与卡芯写在规格上（产品渲染用，不改变 2D 排版） |
 | 板件 | `boards` | 一张贴图按 alpha 扣形 + 板厚 + 最长边 mm。不走蓝图图层。见 [boards.md](./features/boards.md) |
-| 包装盒 | `boxes` | 方盒参数、整盒一张贴图（铺法 original/cover/tile）、棱倒角、每面 UV 壳、单盒渲染 |
-| 产品渲染 | `shots` | 场景库 + 场景编辑；透视/等距；卡/板/盒同框出产品图 |
+| 包装盒 | `boxes` | 简单方盒或详细天地盖；印刷图+UV（详细则天/地各一套）；底色/金属/反光；烫金与UV遮罩；倒角；天盒口沿半圆缺口；单盒渲染 |
+| 产品渲染 | `shots` | 场景库 + 场景编辑；透视/等距；卡/板/盒同框出**静帧**产品图。序列帧改走影棚 |
+| 影棚 | `studios` | 宣传镜头：模版 + 演员槽 + 秒数；可引用产品场景当布景；出 PNG 序列。见 [studio.md](./features/studio.md) |
 | 说明书 | `rulebooks` | 占位；字段待说明书规格补全 |
 
 `[反推]` 当前代码只有 Blueprint / CardSet 的完整编辑器；包装盒、产品渲染已落地，说明书仍占位。
@@ -64,6 +66,7 @@ type Project = {
   sets: CardSet[];
   boxes?: PackagingBox[];     // 包装盒，缺省视为 []
   shots?: ProductShot[];      // 产品渲染场景，缺省视为 []
+  studios?: Studio[];         // 影棚，缺省视为 []
   rulebooks?: Rulebook[];     // 说明书，缺省视为 []
   templates: Template[];   // 派生，勿手改
   decks: Deck[];           // 派生，勿手改
@@ -241,7 +244,10 @@ type CardSetView = {
 ```typescript
 type BoxFace = "top" | "bottom" | "front" | "back" | "left" | "right";
 
-/** 一面在整盒贴图 UV 空间里的矩形壳（Maya 式：移动 / 缩放 / 旋转） */
+type BoxMode = "simple" | "lidBase";
+type BoxSleeve = "upDown" | "frontBack" | "leftRight";
+
+/** 一面在该件印刷贴图 UV 空间里的矩形壳（Maya 式：移动 / 缩放 / 旋转） */
 type UvIsland = {
   u: number;           // 壳中心 U（0–1）
   v: number;           // 壳中心 V（0–1）
@@ -253,6 +259,36 @@ type UvIsland = {
   rotationDeg?: number;
   flipU?: boolean;
   flipV?: boolean;
+};
+
+/** 一张印刷图 + 六面壳。外壁必有 faces；内壁图可空（空则底色），innerFaces 仍可先摆。 */
+type BoxPartMaps = {
+  textureAssetId?: string;
+  textureFit?: "original" | "cover" | "tile";
+  textureTileScale?: number;
+  /** 印刷图在 UV 0–1 里顺时针转，仅 0/90/180/270，缺省 0。不改壳坐标。 */
+  textureRotationDeg?: 0 | 90 | 180 | 270;
+  faces: Record<BoxFace, UvIsland>;
+  innerTextureAssetId?: string;
+  innerTextureFit?: "original" | "cover" | "tile";
+  innerTextureTileScale?: number;
+  innerTextureRotationDeg?: 0 | 90 | 180 | 270;
+  innerFaces?: Record<BoxFace, UvIsland>;
+  foilMaskAssetId?: string;      // 黑白，白=烫金；只跟外壁 UV，铺法同 textureFit / textureRotationDeg
+  varnishMaskAssetId?: string;   // 黑白，白=UV 光油；只跟外壁 UV，铺法同 textureFit / textureRotationDeg
+};
+
+type BoxMaterial = {
+  baseColor?: string;   // 缺省 #ffffff。无印刷或透明处显示；有印刷处贴图盖住，不与底色相乘
+  metallic?: number;    // 0–1，缺省 0。整盒纸面，不是烫金
+  roughness?: number;   // 0–1，缺省 0.55；界面「反光度」= 1 - roughness
+  foilColor?: string;   // 缺省 #d4af37
+  foilMetallic?: number;   // 烫金金属度，缺省 0.95
+  foilRoughness?: number;  // 烫金粗糙度，缺省 0.12（反光度 0.88）
+  foilGrain?: number;      // 烫金磨砂颗粒 0–1，缺省 0.55
+  foilGrainStyle?: "cell" | "frost"; // cell 方块格子（缺省）；frost 无格子连续颗粒
+  varnishRoughness?: number; // UV 光油粗糙度，缺省 0.02，可低到 0.002（镜面清漆）
+  varnishCoat?: number;      // UV 清漆强度 0–4，缺省 1.5；侧面掠射也要反光，>2 接近镜子
 };
 
 type BoxRenderSetup = {
@@ -278,27 +314,60 @@ type BoxRenderSetup = {
   cullOutsideBox?: boolean;   // 按盒子画面包围盒裁边
   resolutionW?: number;
   resolutionH?: number;
+  /**
+   * 点「渲染」时的贴图档。缺省 max。
+   * viewport 交互不读这个字段（视口继续低 DPI）。
+   * max：卡面 300 DPI（单边≤4096）；板件贴图原图像素。
+   * standard：卡面 150 DPI。
+   */
+  exportTexture?: "standard" | "max";
 };
 
 type PackagingBox = {
   id: string;
   name: string;
-  lengthMm: number;  // 默认 100
+  lengthMm: number;  // 默认 100；详细模式=地盒外长
   widthMm: number;   // 默认 150
-  heightMm: number;  // 默认 50
-  textureAssetId?: string;           // 整盒唯一贴图；无则未贴图
-  /** 贴图占满 UV 0–1 的方式。缺省 cover（撑满，1:1 等比裁边） */
+  heightMm: number;  // 默认 50；详细模式=合盖后天盒顶面高度
+  mode?: BoxMode;                    // 缺省 simple
+  lidHeightMm?: number;              // 仅 lidBase
+  baseHeightMm?: number;             // 仅 lidBase
+  wallMm?: number;                   // 仅 lidBase，缺省 1.5
+  lidFitMm?: number;                 // 仅 lidBase，缺省 1；天内壁相对地外壁的间隙
+  sleeve?: BoxSleeve;                // 仅 lidBase，缺省 upDown。前后=地口前/天口后
+  lidOpen?: number;                  // 仅 lidBase，0 合盖 1 打开；缺省 0。打开=天盒沿套合轴正方向平移、不翻转
+  /** 仅 lidBase。天盒开口圈「上下」那一对壁口沿居中半圆。缺省 false */
+  lidNotchUpDown?: boolean;
+  /** 仅 lidBase。天盒开口圈「左右」那一对壁口沿居中半圆。缺省 false */
+  lidNotchLeftRight?: boolean;
+  /** 仅 lidBase。半圆半径 mm，缺省 10。两组都不勾时不挖口 */
+  lidNotchRadiusMm?: number;
+  material?: BoxMaterial;            // 天/地共用
+  textureAssetId?: string;           // simple：整盒印刷图
   textureFit?: "original" | "cover" | "tile";
-  textureTileScale?: number;         // 仅 tile，默认 1
+  textureTileScale?: number;
+  textureRotationDeg?: 0 | 90 | 180 | 270; // simple：印刷图顺时针转；缺省 0
+  foilMaskAssetId?: string;          // simple 工艺遮罩
+  varnishMaskAssetId?: string;
   bevelMm?: number;                  // 棱边倒角，mm，默认 0
-  faces: Record<BoxFace, UvIsland>;  // 每面一块壳，采样同一张贴图
+  faces: Record<BoxFace, UvIsland>;  // simple 六面壳
+  lid?: BoxPartMaps;                 // lidBase 天盒图+UV
+  base?: BoxPartMaps;                // lidBase 地盒图+UV
   render?: BoxRenderSetup;
 };
 ```
 
-约束：没有 per-face `assetId`。换图只改 `textureAssetId`，六面 UV 壳保留。屏幕上的壳宽高 = `w * (scaleX ?? 1)`、`h * (scaleY ?? 1)`。`textureFit` 决定贴图如何铺进 UV 0–1，再被各面壳采样。
+约束：没有 per-face 漫反射 `assetId`。简单模式换图只改根上的 `textureAssetId`，六面壳保留，无内壁。详细模式天、地各一份 `BoxPartMaps`：外壁 `textureAssetId`+`faces`，内壁 `innerTextureAssetId`+`innerFaces`（可空，空则底色）。**禁止**内壁采样外壁 UV。工艺遮罩只跟外壁壳，铺法与该件外壁 `textureFit` 相同，旋转与 `textureRotationDeg` 相同。屏幕上的壳宽高 = `w * (scaleX ?? 1)`、`h * (scaleY ?? 1)`。`textureFit` / `innerTextureFit` 各自铺进 UV 0–1，然后再按该层 `textureRotationDeg` 顺时针转。旧数据无旋转字段视为 0。
 
-`resolutionW` / `resolutionH` 缺省 1920×1080，可预选或自定义（**大于 0**，上限约 32768）。键入过程中不要夹到 256。`camera.target` 缺省原点；产品渲染与包装盒 3D 渲染视口用 **中键拖** 或 Alt+左键平移看向点。旧数据无 `target` 视为 `{0,0,0}`。
+地盒外壁默认 UV 网 ≠ 天盒十字网：先把前/后壳对调，再整网绕 `(0.5, 0.5)` 转 180°（见 [packaging.md](./features/packaging.md)）。`innerFaces`、天盒、简单方盒仍用 `defaultUvNet`。打开旧工程不要自动改已保存的壳。
+
+旧工程无 `mode` 视为 `simple`。切到 `lidBase` 时若还没有 `lid`/`base`，把当前 `textureAssetId` + `faces` 复制为 **外壁**，再单独生成 `innerFaces` 默认展开（按内板尺寸，不要复制外壁壳）。旧 `lidBase` 没有 `innerFaces` 时同样补默认内壳，内图保持空。
+
+`lidBase`：`sleeve` 缺省 `upDown`（地口上、天口下）；`frontBack` 地口前天口后；`leftRight` 地口右天口左。旧数据无 `sleeve` 视为上下。天内径 = 垂直套合轴的地外径 + 2×`lidFitMm`，天外径再加 2×`wallMm`。`lidOpen` 缺省 0；1 时天盒沿该轴正方向移约件深+10mm，不翻转。旧数据无 `lidOpen` 视为合盖。
+
+天盒口沿半圆缺口：`lidNotchUpDown` / `lidNotchLeftRight` 缺省 false；`lidNotchRadiusMm` 缺省 10。旧数据无此三字段视为不挖口。只改天盒开口圈网格，地盒不挖。两对边与套合轴的对应见 [packaging.md](./features/packaging.md)。半径夹紧到 ≥0、不超过该壁开口跨度一半、不超过天盒件深约 90%。简单模式忽略这些字段。
+
+`resolutionW` / `resolutionH` 缺省 1920×1080，可预选或自定义（**大于 0**，上限约 32768）。键入过程中不要夹到 256。`exportTexture` 缺省 `max`：出图卡面 300 DPI、板件用原图；视口不读此字段。`camera.target` 缺省原点；产品渲染与包装盒 3D 渲染视口用 **中键拖** 或 Alt+左键平移看向点。旧数据无 `target` 视为 `{0,0,0}`。
 
 ## ProductShot
 
@@ -318,6 +387,8 @@ type ProductShotItem = {
   rotationDeg: { x: number; y: number; z: number };
   scale?: number;     // 默认 1
   slotId?: string;    // 布局模版槽位；未填时视口画占位体
+  /** 仅 kind=box 且详细天地盖。0 合上～1 打开。缺省跟随包装盒 `lidOpen`，不改包装页 */
+  lidOpen?: number;
   /** 仅 kind=stack。缺省 = 满集 + 牌组形态 */
   stack?: ShotStackLook;
 };
@@ -377,21 +448,21 @@ type ProductShot = {
   render: BoxRenderSetup;   // 灯光/背景/分辨率；camera 轨道与当前看穿机同步
   look?: ProductShotLook;
   layoutId?: string;        // 最近应用的内置布局 id（empty / box-fan / box-row / box-stack-fan）
-  /** 后期：转台序列。缺省视为未配置，静帧导出不读这些字段 */
+  /** @deprecated 序列帧改走影棚。打开忽略，不要实现场景上的渲染序列 */
   sequence?: ShotSequence;
 };
 
-/** 后期（Maya Render Sequence）。第一刀只有转台。见 product-render.md */
+/** @deprecated 见 Studio。旧文档字段，打开丢弃即可 */
 type ShotSequence = {
-  mode?: "turntable";     // 缺省 turntable
-  frames?: number;        // 缺省 120
-  fps?: number;           // 缺省 24，只供对齐剪辑，不编码视频
-  yawFrom?: number;       // 缺省当前 camera.yaw
-  yawTo?: number;         // 缺省 yawFrom + 360
+  mode?: "turntable";
+  frames?: number;
+  fps?: number;
+  yawFrom?: number;
+  yawTo?: number;
 };
 ```
 
-`Project.shots?: ProductShot[]`。缺省 `[]`。进入产品渲染页 **不要**自动建场景；库为空就显示空态。
+`Project.shots?: ProductShot[]`。缺省 `[]`。进入产品渲染页 **不要**自动建场景；库为空就显示空态。序列帧见下方 `Studio`，不要在 `ProductShot` 上实现。
 
 卡牌 / 卡牌集放入场景时默认卡面平行地面、正面朝上。新放入 `rotationDeg = {0,0,0}`（头尾已编进网格）。`face` 缺省 `front`：网格顶面始终正面、底面始终背面。`face: "back"` 背面朝上时不换贴图，只在局部先绕 X 180° 再绕 Y 180°。旧扇形若只写了 `stack.fanDir === "down"` 且未写 `face`，视为背面朝上。
 
@@ -399,7 +470,91 @@ type ShotSequence = {
 
 包装盒实例只读取该盒已有的 `bevelMm`，产品场景数据里 **没有** 倒角字段。
 
-`cameras` / `lookThroughId`：旧场景没有时，`normalize` 用 `render.camera` 生成一台 `persp` 并看穿它。删摄像机不能删光。看穿机的轨道与 `render.camera` 保持同步，便于后期转台仍读 yaw。
+`cameras` / `lookThroughId`：旧场景没有时，`normalize` 用 `render.camera` 生成一台 `persp` 并看穿它。删摄像机不能删光。看穿机的轨道与 `render.camera` 保持同步。影棚引用场景当布景时只读物件；第一次写入 `backdrop.shotId` 时把该场景看穿机轨道 **同时复制** 到 `Studio.viewCamera` 和 `Studio.render.camera`（以及各自 projection），之后互不回写。
+
+## Studio
+
+宣传片影棚。模版规定剧本和演员槽；物件是引用，不拥有包装盒 / 卡牌集。见 [studio.md](./features/studio.md)。
+
+```typescript
+type StudioTemplateId =
+  | "unbox-turntable"  // 开盒转台；盒必须 lidBase
+  | "box-turntable"    // 盒转台；简单或详细
+  | "card-spread"      // 排列展开
+  | "card-batch";      // 分批亮相
+
+type StudioOrbitCamera = {
+  yaw: number;
+  pitch: number;
+  distance: number;
+  fov: number;
+  target?: { x: number; y: number; z: number };
+  projection?: "perspective" | "isometric";
+};
+
+type StudioActor = {
+  slotId: "box" | "stack";
+  kind: "box" | "stack";  // 与 slotId 一致
+  refId: string;          // box → boxId；stack → setId
+  /** 仅 box + 详细天地盖。0 合上～1 打开。缺省 0。开盒转台=开场；盒转台=全程保持 */
+  lidOpen?: number;
+  /** 仅 stack。与 ProductShotItem.face 相同 */
+  face?: "front" | "back";
+  /** 仅 stack。与 ProductShotItem.stack 相同；排列/分批的终态读这里，不在 StudioParams */
+  stack?: ShotStackLook;
+};
+
+type StudioBackdrop = {
+  kind?: "none" | "color" | "shot";  // 缺省 none
+  color?: string;                    // kind=color
+  shotId?: string;                   // kind=shot → ProductShot.id
+};
+
+type StudioParams = {
+  unboxSeconds?: number;     // 缺省 1.5；仅开盒转台
+  turnSeconds?: number;      // 缺省 4
+  turns?: number;            // 缺省 1
+  overlapUnboxTurn?: boolean; // 缺省 false：先开完再转
+  spreadSeconds?: number;    // 缺省 2；排列展开
+  batchSize?: number;        // 缺省 8
+  batchGapSeconds?: number;  // 缺省 0.8
+  /** 仅转台模版。缺省 false：主光钉世界；true：主光 yaw 跟渲染机转台偏航同步 */
+  lightsFollowTurn?: boolean;
+};
+
+type Studio = {
+  id: string;
+  name: string;
+  templateId: StudioTemplateId;
+  actors: StudioActor[];     // 每槽最多一条
+  backdrop?: StudioBackdrop;
+  params?: StudioParams;
+  render: BoxRenderSetup;    // 渲染机 rest + 灯/背景/分辨率/出图贴图/剔除背景
+  /** 操作机。序列不吃。缺省 = 打开时从 render.camera 复制 */
+  viewCamera?: StudioOrbitCamera;
+  /** 视口看穿哪台。缺省 view（操作机） */
+  lookThrough?: "view" | "render";
+  fps?: number;              // 缺省 24，写出帧数 = round(时长 × fps)
+};
+```
+
+`Project.studios?: Studio[]`。缺省 `[]`。进入影棚页 **不要**自动建。打开旧工程无 `studios` 视为 `[]`。
+
+约束：
+
+- `unbox-turntable` 的 `box` 槽：`PackagingBox.mode` 必须是 `lidBase`，否则槽无效，不能渲序列
+- `box-turntable` 的 `box` 槽：简单或详细都可以
+- `card-spread` / `card-batch` 必须有有效 `stack` 槽
+- 布景 `kind: "shot"` 且 `shotId` 指向已删场景：布景丢失，不删影棚
+- 布景物件与已填演员同一 `kind`+`refId` 时布景不画该件
+- 第一次写入 `backdrop.shotId` 时，把该场景看穿机轨道 **同时复制** 到 `viewCamera` 和 `render.camera`（仅这一次）。之后改操作机不得改渲染机
+- 打开旧影棚无 `viewCamera`：从当时 `render.camera` + `render.projection` 复制一份；`lookThrough` 缺省 `view`
+- 空白拖轨道改 **当前 `lookThrough` 那台**。序列每一帧构图 = `render.camera` rest + 模版偏航，**不吃** `viewCamera`
+- 分辨率红框的透视/等距/FOV 永远跟渲染机（`render.camera` / `render.projection`）
+- 旧 `params.spreadShape` / `spread` / `countFrom` / `countTo` / `fanInnerMm` / `fanOuterMm` / `gapMm`：normalize 时若该棚已有 `stack` 演员且演员尚未写 `stack`，迁到 `actor.stack`（`spreadShape` → `shape`），然后丢掉 params 上这些字段
+- 开盒整体居中只在影棚 compose（天+地 AABB 中心钉槽位原点），不写回包装盒 `lidOpen`，不改包装页预览
+- `lidOpen`、播放进度、转台偏航、`lightsFollowTurn` 算出的主光 yaw **不准**进贴图 cache key
+- 旧 `ProductShot.sequence` 打开丢弃，不要 migrate 成 Studio（用户在影棚库新建）
 
 ## Rulebook
 
@@ -477,7 +632,9 @@ type ExportPreset = {
 
 ## 文件夹格式 (ceditor-folder-v1)
 
-磁盘上的 `project.json` 不含内联 data URL 大资产；资产存 `assets/` 子目录，JSON 内为相对路径。卡牌规格存 `data/piece-specs/{id}.json`。板件存 **`data/boards/{id}.json`**（与 `boxes/`、`shots/` 同级）。漏写 boards 会导致重开后场景里的板件变成「丢失」。
+磁盘上的 `project.json` 不含内联 data URL 大资产；资产存 `assets/` 子目录，JSON 内为相对路径。卡牌规格存 `data/piece-specs/{id}.json`。板件存 **`data/boards/{id}.json`**。影棚存 **`data/studios/{id}.json`**（与 `boxes/`、`shots/` 同级）。漏写 boards 会导致重开后场景里的板件变成「丢失」；漏写 studios 会导致影棚库空。
+
+工程根下另外三份 **产物目录**（不进 `project.json`，可随时删了再导）：`渲染图/` 静帧 PNG；`序列帧/` 影棚 PNG 序列；`导出模型/{名称}/` ASCII FBX+贴图（给 Maya）。见 [product-render.md](./features/product-render.md)、[studio.md](./features/studio.md)。
 
 **覆盖素材**：同一 `assetId` 可被新文件覆盖。覆盖后所有引用该 id 的预览必须立刻换图，不得继续显示旧缓存。
 

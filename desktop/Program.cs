@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http;
+using System.Reflection;
+using System.Text.RegularExpressions;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -12,6 +14,7 @@ static class Program
 
     static Process? _server;
     static bool _startedServer;
+    static bool _preview;
     static int _dead;
 
     [STAThread]
@@ -32,27 +35,26 @@ static class Program
         }
 
         Directory.SetCurrentDirectory(root);
-        try
-        {
-            EnsureNodeModules(root);
-            StartSidecar(root);
-            if (!WaitReady())
-            {
-                MessageBox.Show("本地服务没有在 1420 起来。可再双击一次，或运行「打开卡牌工坊.bat /console」看日志。", "TMD", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Shutdown();
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(ex.Message, "TMD", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            Shutdown();
-            return;
-        }
-
+        _preview = UsePreview(root, args);
         Application.ApplicationExit += (_, _) => Shutdown();
         Application.Run(new MainForm(root));
         Shutdown();
+    }
+
+    static bool WantDev(string[] args)
+    {
+        foreach (var a in args)
+        {
+            if (a.Equals("--dev", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        var env = Environment.GetEnvironmentVariable("TMD_DEV");
+        return env == "1" || string.Equals(env, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    static bool UsePreview(string root, string[] args)
+    {
+        if (WantDev(args)) return false;
+        return File.Exists(Path.Combine(root, "dist", "index.html"));
     }
 
     static void PickFolderAndExit(string[] args)
@@ -75,6 +77,32 @@ static class Program
         if (!string.IsNullOrEmpty(outFile))
             File.WriteAllText(outFile, dlg.SelectedPath);
         Environment.Exit(0);
+    }
+
+    internal static string AppVersion(string root)
+    {
+        try
+        {
+            var json = File.ReadAllText(Path.Combine(root, "package.json"));
+            var m = Regex.Match(json, "\"version\"\\s*:\\s*\"([^\"]+)\"");
+            if (m.Success) return m.Groups[1].Value;
+        }
+        catch
+        {
+            /* fall through */
+        }
+        var info = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrEmpty(info)) return info.Split('+')[0];
+        var ver = typeof(Program).Assembly.GetName().Version;
+        return ver is null ? "" : $"{ver.Major}.{ver.Minor}.{ver.Build}";
+    }
+
+    internal static void BootSidecar(string root)
+    {
+        if (!_preview) EnsureNodeModules(root);
+        StartSidecar(root);
+        if (!WaitReady())
+            throw new InvalidOperationException("本地服务没有在 1420 起来。可再双击一次，或运行「打开卡牌工坊.bat /console」看日志。");
     }
 
     static void EnsureNodeModules(string root)
@@ -105,11 +133,19 @@ static class Program
     {
         if (ReadyOnce()) return;
         var vite = Path.Combine(root, "node_modules", "vite", "bin", "vite.js");
-        if (!File.Exists(vite)) throw new InvalidOperationException("找不到 Vite。请先在本目录完成 npm install。");
+        if (!File.Exists(vite))
+        {
+            throw new InvalidOperationException(_preview
+                ? "发版包不完整（缺少 Vite）。请重新下载完整离线包。"
+                : "找不到 Vite。请先在本目录完成 npm install。");
+        }
+        var arguments = _preview
+            ? $"\"{vite}\" preview --host 0.0.0.0 --port {Port} --strictPort"
+            : $"\"{vite}\" --host 0.0.0.0 --port {Port}";
         var psi = new ProcessStartInfo
         {
             FileName = NodeExe(root),
-            Arguments = $"\"{vite}\" --host 0.0.0.0 --port {Port}",
+            Arguments = arguments,
             WorkingDirectory = root,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -205,19 +241,65 @@ static class Program
 
 sealed class MainForm : Form
 {
-    readonly WebView2 _web = new() { Dock = DockStyle.Fill };
+    readonly WebView2 _web = new() { Dock = DockStyle.Fill, Visible = false };
+    readonly Label _splash;
     readonly string _root;
+    readonly Task _sidecar;
 
     public MainForm(string root)
     {
         _root = root;
-        Text = "TMD";
-        Width = 1280;
-        Height = 840;
-        StartPosition = FormStartPosition.CenterScreen;
+        var verText = Program.AppVersion(root);
+        Text = string.IsNullOrEmpty(verText) ? "TMD" : $"TMD {verText}";
+        MinimumSize = new Size(960, 600);
+        StartPosition = FormStartPosition.Manual;
+        FillScreen();
+        BackColor = Color.FromArgb(22, 22, 24);
+        _splash = new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.FromArgb(230, 230, 232),
+            BackColor = Color.FromArgb(22, 22, 24),
+            Font = new Font("Segoe UI", 16f, FontStyle.Regular),
+            Text = string.IsNullOrEmpty(verText)
+                ? "TMD\n正在启动…"
+                : $"TMD  v{verText}\n正在启动…",
+        };
         Controls.Add(_web);
-        Shown += async (_, _) => await BootWeb();
+        Controls.Add(_splash);
+        _splash.BringToFront();
+        _sidecar = Task.Run(() => Program.BootSidecar(_root));
+        Load += (_, _) => FillScreen();
+        Shown += async (_, _) =>
+        {
+            FillScreen();
+            await FinishBoot();
+        };
         FormClosed += (_, _) => Program.Shutdown();
+    }
+
+    void FillScreen()
+    {
+        var screen = IsHandleCreated ? Screen.FromHandle(Handle) : Screen.FromPoint(Cursor.Position);
+        var wa = (screen ?? Screen.PrimaryScreen)?.WorkingArea ?? new Rectangle(0, 0, 1280, 840);
+        WindowState = FormWindowState.Normal;
+        Bounds = wa;
+        WindowState = FormWindowState.Maximized;
+    }
+
+    async Task FinishBoot()
+    {
+        try
+        {
+            await _sidecar;
+            await BootWeb();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "TMD", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Close();
+        }
     }
 
     async Task BootWeb()
@@ -234,19 +316,17 @@ sealed class MainForm : Form
                 e.Handled = true;
                 _web.CoreWebView2.Navigate(e.Uri);
             };
-            _web.CoreWebView2.Navigate(UrlConst());
+            _web.CoreWebView2.NavigationCompleted += (_, _) =>
+            {
+                _web.Visible = true;
+                _splash.Visible = false;
+            };
+            _web.CoreWebView2.Navigate("http://127.0.0.1:1420/");
         }
         catch (WebView2RuntimeNotFoundException)
         {
             MessageBox.Show("需要 Microsoft Edge WebView2 运行时。请安装 Edge 或 WebView2 Runtime。", "TMD", MessageBoxButtons.OK, MessageBoxIcon.Error);
             Close();
         }
-        catch (Exception ex)
-        {
-            MessageBox.Show(ex.Message, "TMD", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            Close();
-        }
     }
-
-    static string UrlConst() => "http://127.0.0.1:1420/";
 }

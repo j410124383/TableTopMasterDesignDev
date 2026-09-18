@@ -95,9 +95,12 @@ async function waitWindow(child) {
 
 function startServer() {
   const viteJs = join(root, "node_modules/vite/bin/vite.js");
+  const preview = existsSync(join(root, "dist/index.html")) && process.env.TMD_DEV !== "1";
   const args = existsSync(viteJs)
-    ? [viteJs, "--host", "0.0.0.0", "--port", String(PORT)]
-    : [join(root, "node_modules/npm/bin/npm-cli.js"), "run", "start"];
+    ? preview
+      ? [viteJs, "preview", "--host", "0.0.0.0", "--port", String(PORT), "--strictPort"]
+      : [viteJs, "--host", "0.0.0.0", "--port", String(PORT)]
+    : [join(root, "node_modules/npm/bin/npm-cli.js"), "run", preview ? "serve" : "start"];
   return spawn(process.execPath, args, {
     cwd: root,
     env: { ...process.env, TMD_NO_BROWSER: "1" },

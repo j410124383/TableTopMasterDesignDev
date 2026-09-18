@@ -56,4 +56,11 @@ export default defineConfig({
       ignored: ["**/release/**", "**/data/**", "**/public/*.zip", "**/public/fonts/**", "**/vendor/**"],
     },
   },
+  preview: {
+    port: 1420,
+    strictPort: true,
+    host: "0.0.0.0",
+    allowedHosts: true,
+    open: false,
+  },
 });

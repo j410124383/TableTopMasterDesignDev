@@ -37,13 +37,38 @@ const IMAGE_EXTS = new Set([
   ".woff2",
 ]);
 
+async function resolveReadableFile(disk: string): Promise<string> {
+  const tries = [disk];
+  try {
+    const once = decodeURIComponent(disk);
+    if (once !== disk) tries.push(once);
+  } catch {
+    /* keep */
+  }
+  for (const t of tries) {
+    if (existsSync(t)) return t;
+  }
+  const primary = tries[0]!;
+  const dir = path.dirname(primary);
+  const want = path.basename(primary).normalize("NFC");
+  try {
+    const names = await readdir(dir);
+    const hit = names.find((n) => n === path.basename(primary) || n.normalize("NFC") === want);
+    if (hit) return path.join(dir, hit);
+  } catch {
+    /* missing dir */
+  }
+  return primary;
+}
+
 async function readFileAsServed(disk: string): Promise<{ buf: Buffer; type: string }> {
-  const ext = path.extname(disk).toLowerCase();
-  const raw = await readFile(disk);
+  const resolved = await resolveReadableFile(disk);
+  const ext = path.extname(resolved).toLowerCase();
+  const raw = await readFile(resolved);
   if (ext === ".psd") {
     return { buf: psdBufferToPng(raw), type: "image/png" };
   }
-  return { buf: raw, type: mimeOf(disk) };
+  return { buf: raw, type: mimeOf(resolved) };
 }
 
 async function indexImageTree(imagesRoot: string): Promise<Record<string, string>> {
@@ -291,6 +316,7 @@ async function writeSplitProject(dir: string, project: Record<string, unknown>):
   await writeJsonDir(path.join(dataDir, "decks"), (project.decks as { id?: string }[]) ?? [], "deck");
   await writeJsonDir(path.join(dataDir, "boxes"), (project.boxes as { id?: string }[]) ?? [], "box");
   await writeJsonDir(path.join(dataDir, "shots"), (project.shots as { id?: string }[]) ?? [], "shot");
+  await writeJsonDir(path.join(dataDir, "studios"), (project.studios as { id?: string }[]) ?? [], "studio");
   await writeJsonDir(path.join(dataDir, "boards"), (project.boards as { id?: string }[]) ?? [], "brd");
   await writeFile(path.join(dataDir, "variables.json"), JSON.stringify(project.variables ?? [], null, 2), "utf8");
   await writeFile(path.join(dataDir, "fonts.json"), JSON.stringify(project.fonts ?? [], null, 2), "utf8");
@@ -323,8 +349,12 @@ async function readProjectFolder(dir: string): Promise<unknown> {
   const assetIndex = ((await readSide("assets.json")) ?? {}) as Record<string, string>;
   // 扫磁盘补上未登记的图（含用户手放的 CardPSD/*.psd）
   const scanned = await indexImageTree(path.join(dir, "assets", "images"));
+  const relTaken = new Set(Object.values(assetIndex).map((v) => v.replaceAll("\\", "/").split("?")[0]));
   for (const [id, rel] of Object.entries(scanned)) {
-    if (!assetIndex[id]) assetIndex[id] = rel;
+    const normRel = rel.replaceAll("\\", "/");
+    if (assetIndex[id] || relTaken.has(normRel)) continue;
+    assetIndex[id] = rel;
+    relTaken.add(normRel);
   }
   const assets: Record<string, string> = {};
   for (const [id, rel] of Object.entries(assetIndex)) {
@@ -345,6 +375,7 @@ async function readProjectFolder(dir: string): Promise<unknown> {
     sets: await readJsonDir(path.join(dataDir, "sets")),
     boxes: await readJsonDir(path.join(dataDir, "boxes")),
     shots: await readJsonDir(path.join(dataDir, "shots")),
+    studios: await readJsonDir(path.join(dataDir, "studios")),
     boards: await readJsonDir(path.join(dataDir, "boards")),
     variables: (await readSide("variables.json")) ?? [],
     fonts: (await readSide("fonts.json")) ?? [],

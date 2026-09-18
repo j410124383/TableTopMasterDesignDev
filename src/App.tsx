@@ -17,9 +17,11 @@ import { BoxPage } from "@/features/box/BoxPage";
 import { BoardPage } from "@/features/board/BoardPage";
 import { ManualPage } from "@/features/manual/ManualPage";
 import { ShotPage } from "@/features/shot/ShotPage";
+import { StudioPage } from "@/features/studio/StudioPage";
 import { useAppStore } from "@/store/appStore";
 import { bootLocale, useT } from "@/store/localeStore";
 import { applyTheme, useThemeStore } from "@/store/themeStore";
+import { versionStamp } from "@/lib/appVersion";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { message: string | null }> {
   state = { message: null as string | null };
@@ -64,6 +66,7 @@ export function App() {
       <div className="boot-splash">
         <div className="boot-mark" />
         <p className="muted">{t("boot.loading")}</p>
+        <p className="muted">{versionStamp()}</p>
       </div>
     );
   }
@@ -118,6 +121,7 @@ function AppRoutes({ current }: { current: boolean }) {
           <Route path="box" element={<BoxPage />} />
           <Route path="board" element={<BoardPage />} />
           <Route path="shot" element={<ShotPage />} />
+          <Route path="studio" element={<StudioPage />} />
           <Route path="manual" element={<ManualPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

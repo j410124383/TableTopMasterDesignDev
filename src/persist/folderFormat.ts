@@ -1,6 +1,6 @@
 import { DEFAULT_PRINT } from "@/model/defaults";
 import { validateProject } from "@/model/schema";
-import type { Blueprint, BoardPiece, CardSet, Deck, PackagingBox, PieceSpec, PrintSettings, ProductShot, Project, ProjectMeta, Rulebook, Template } from "@/model/types";
+import type { Blueprint, BoardPiece, CardSet, Deck, PackagingBox, PieceSpec, PrintSettings, ProductShot, Project, ProjectMeta, Rulebook, Studio, Template } from "@/model/types";
 import {
   ensureSubdir,
   fileExists,
@@ -222,6 +222,14 @@ export async function writeProjectToFolder(
   for (const shot of project.shots ?? []) {
     await writeTextFile(shotDir, `${shot.id}.json`, JSON.stringify(shot, null, 2));
   }
+  const studioDir = await ensureSubdir(data, "studios");
+  const keepStudio = new Set((project.studios ?? []).map((s) => `${s.id}.json`));
+  for (const name of await listFileNames(studioDir)) {
+    if (name.endsWith(".json") && !keepStudio.has(name)) await removeFile(studioDir, name);
+  }
+  for (const studio of project.studios ?? []) {
+    await writeTextFile(studioDir, `${studio.id}.json`, JSON.stringify(studio, null, 2));
+  }
   const boardDir = await ensureSubdir(data, "boards");
   const keepBoard = new Set((project.boards ?? []).map((b) => `${b.id}.json`));
   for (const name of await listFileNames(boardDir)) {
@@ -316,6 +324,14 @@ export async function readProjectFromFolder(
           shots.push(JSON.parse(await readTextFile(shotDir, name)) as ProductShot);
         }
       }
+      const studios: Studio[] = [];
+      const studioDir = data ? await tryGetDir(data, "studios") : null;
+      if (studioDir) {
+        for (const name of await listFileNames(studioDir)) {
+          if (!name.endsWith(".json")) continue;
+          studios.push(JSON.parse(await readTextFile(studioDir, name)) as Studio);
+        }
+      }
       const boards: BoardPiece[] = [];
       const boardDir = data ? await tryGetDir(data, "boards") : null;
       if (boardDir) {
@@ -357,6 +373,7 @@ export async function readProjectFromFolder(
         print,
         boxes,
         shots,
+        studios,
         boards,
         rulebooks,
       });

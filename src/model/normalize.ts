@@ -4,6 +4,7 @@ import { ensureCardSetViews } from "./cardSetView";
 import { applySpecToBlueprint, ensurePieceSpecs } from "./pieceSpec";
 import { CARD_STOCK_MM } from "./piece";
 import { ensureShotCameras } from "./shotCamera";
+import { ensureStudio } from "./studio";
 import type { Blueprint, BoardPiece, CardSet, Deck, PieceOrientation, PieceSpec, Project, Template } from "./types";
 import { ensureBoxFaces } from "./box";
 
@@ -101,6 +102,7 @@ export function syncDerived(project: Project): Project {
     boxes: (project.boxes ?? []).map(ensureBoxFaces),
     boards: project.boards ?? [],
     shots: (project.shots ?? []).map(ensureShotCameras),
+    studios: (project.studios ?? []).map(ensureStudio),
     rulebooks: project.rulebooks ?? [],
     pieceSpecs: project.pieceSpecs ?? [],
     templates: templatesFromBlueprints(blueprints),
@@ -126,6 +128,7 @@ export function normalizeProject(project: Project): Project {
         boxes: project.boxes ?? [],
         boards: (project.boards ?? []).map(normalizeBoardPiece),
         shots: (project.shots ?? []).map(ensureShotCameras),
+        studios: project.studios ?? [],
         rulebooks: project.rulebooks ?? [],
         pieceSpecs: project.pieceSpecs ?? [],
       }),

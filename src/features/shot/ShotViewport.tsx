@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BoxGl, type SceneDrawItem } from "@/features/box/boxGl";
 import { cameraBodyMesh, matMul, matRotateXYZ, matTranslate } from "@/features/box/boxGeom";
+import { drawAxisWidget } from "@/features/box/axisWidget";
+import { WorkLock } from "@/ui/WorkLock";
 import type { BoxRenderSetup, ProductShotItem, ProductShotLook, Project, ShotCamera } from "@/model/types";
 import { applyProductLook } from "./shotLook";
 import { axisDir, drawGizmo, pickGizmo, type GizmoAxis, type GizmoMode, type GizmoSpace } from "./shotGizmo";
@@ -58,6 +60,8 @@ export function ShotViewport({
   gizmoMode = "move",
   gizmoSpace = "local",
   lookThroughName,
+  lockOnLoad = true,
+  pathPoints = [],
 }: {
   items: ProductShotItem[];
   selectedId: string | null;
@@ -77,6 +81,9 @@ export function ShotViewport({
   gizmos?: boolean;
   gizmoMode?: GizmoMode;
   gizmoSpace?: GizmoSpace;
+  /** 贴图未就绪时是否盖工作锁。影棚播放条改开合/展开时必须 false */
+  lockOnLoad?: boolean;
+  pathPoints?: { x: number; y: number; z: number }[];
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLCanvasElement>(null);
@@ -96,6 +103,7 @@ export function ShotViewport({
   const onCameraTransformRef = useRef(onCameraTransform);
   const camerasRef = useRef(cameras);
   const lookThroughRef = useRef(lookThroughId);
+  const pathRef = useRef(pathPoints);
   const drawItemsRef = useRef<SceneDrawItem[]>([]);
   const meshCacheRef = useRef(new Map<string, ShotDrawPart[]>());
   const projectRef = useRef(project);
@@ -113,9 +121,11 @@ export function ShotViewport({
   onCameraTransformRef.current = onCameraTransform;
   camerasRef.current = cameras;
   lookThroughRef.current = lookThroughId;
+  pathRef.current = pathPoints;
   projectRef.current = project;
   const geomSig = shotGeomSig(project);
   const contentKeys = items.map((it) => shotItemContentKey(it, project)).join("|");
+  const [sceneBusy, setSceneBusy] = useState(false);
 
   function lookActive(l?: ProductShotLook | null) {
     if (!l) return false;
@@ -157,12 +167,21 @@ export function ShotViewport({
         projection: c.projection,
         selected: c.id === selectedRef.current,
       }));
+    const pathLines = (pathRef.current ?? []).slice(0, -1).map((a, i) => {
+      const b = pathRef.current[i + 1]!;
+      return {
+        a: [a.x, a.y, a.z] as [number, number, number],
+        b: [b.x, b.y, b.z] as [number, number, number],
+        rgb: [1, 0.86, 0.28] as [number, number, number],
+      };
+    });
     gl.drawScene(setup, drawn, {
       gizmos: showWorld,
       transparentBg: setup.cullBackground,
       groundY: 0,
       filmGate: gizmosRef.current,
       cameras: showWorld ? camGizmos : [],
+      pathLines: showWorld ? pathLines : [],
     });
     const vctx = view.getContext("2d");
     if (!vctx) return;
@@ -177,6 +196,9 @@ export function ShotViewport({
     const film = filmSize(setup);
     const dpr = view.width / Math.max(1, r.width);
     if (gizmosRef.current) drawFilmGate(vctx, view.width, view.height, film.w, film.h, dpr);
+    if (gizmosRef.current && !active) {
+      drawAxisWidget(vctx, r.width, r.height, dpr, setup.camera.yaw, setup.camera.pitch);
+    }
     if (gizmosRef.current) {
       const selected = itemsRef.current.find((it) => it.id === selectedRef.current);
       const cam = camerasRef.current.find((c) => c.id === selectedRef.current);
@@ -220,7 +242,11 @@ export function ShotViewport({
     let dead = false;
     const cache = meshCacheRef.current;
     const missing = itemsRef.current.filter((it) => !cache.has(shotItemContentKey(it, projectRef.current)));
-    if (!missing.length) return;
+    if (!missing.length) {
+      setSceneBusy(false);
+      return;
+    }
+    if (lockOnLoad) setSceneBusy(true);
     void (async () => {
       await new Promise<void>((r) => requestAnimationFrame(() => r()));
       if (dead) return;
@@ -236,13 +262,14 @@ export function ShotViewport({
       }
       if (dead) return;
       drawItemsRef.current = composeShotDrawItems(itemsRef.current, selectedRef.current, projectRef.current, cache);
+      setSceneBusy(false);
       void paint();
     })();
     return () => {
       dead = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contentKeys, projectDir, geomSig]);
+  }, [contentKeys, projectDir, geomSig, lockOnLoad]);
 
   useEffect(() => {
     const cache = meshCacheRef.current;
@@ -253,7 +280,7 @@ export function ShotViewport({
 
   useEffect(() => {
     void paint();
-  }, [render, look, gizmos, gizmoMode, gizmoSpace, cameras, lookThroughId]);
+  }, [render, look, gizmos, gizmoMode, gizmoSpace, cameras, lookThroughId, pathPoints]);
 
   return (
     <div
@@ -408,6 +435,7 @@ export function ShotViewport({
       <canvas ref={glCanvasRef} className="shot-gl-offscreen" />
       <canvas ref={viewRef} />
       {lookThroughName ? <div className="shot-cam-hud">看穿：{lookThroughName}</div> : null}
+      <WorkLock open={sceneBusy} title="正在加载场景预览" detail="准备模型与贴图，完成后即可继续摆放。" />
     </div>
   );
 }
